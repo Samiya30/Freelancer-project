@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: freelanceos-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: freelanceos
+      POSTGRES_PASSWORD: freelanceos_dev_password
+      POSTGRES_DB: freelanceos
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - ./docker/postgres-data:/var/lib/postgresql/data

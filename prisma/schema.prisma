@@ -1,0 +1,464 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LeadStatus {
+  New
+  Contacted
+  Qualified
+  Proposal
+  Won
+  Lost
+}
+
+enum ClientStatus {
+  Active
+  Inactive
+}
+
+enum ProposalStatus {
+  Draft
+  Sent
+  Viewed
+  Accepted
+  Rejected
+  Expired
+}
+
+enum ContractStatus {
+  Draft
+  Sent
+  Viewed
+  Signed
+  Expired
+  Cancelled
+}
+
+enum ProjectStatus {
+  Planning
+  InProgress
+  Review
+  Completed
+  OnHold
+}
+
+enum TaskStatus {
+  ToDo
+  InProgress
+  Review
+  Done
+}
+
+enum TaskPriority {
+  Low
+  Medium
+  High
+  Urgent
+}
+
+enum InvoiceStatus {
+  Draft
+  Sent
+  Viewed
+  Paid
+  Overdue
+  Cancelled
+}
+
+enum PaymentStatus {
+  Completed
+  Pending
+  Failed
+}
+
+enum PaymentMethod {
+  UPI
+  BankTransfer
+  Card
+  Cash
+}
+
+enum ExpenseCategory {
+  Software
+  Marketing
+  Travel
+  Office
+  Equipment
+  Utilities
+  Other
+}
+
+enum ExpenseStatus {
+  Paid
+  Pending
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String   @default("")
+  firstName String   @default("")
+  lastName  String   @default("")
+  phone     String   @default("")
+  role      String   @default("Freelancer")
+  bio       String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clients       Client[]
+  leads         Lead[]
+  proposals     Proposal[]
+  contracts     Contract[]
+  projects      Project[]
+  tasks         Task[]
+  timeEntries   TimeEntry[]
+  invoices      Invoice[]
+  payments      Payment[]
+  expenses      Expense[]
+  conversations Conversation[]
+  messages      Message[]
+  files         File[]
+  settings      Settings?
+  sessions      Session[]
+}
+
+model Session {
+  id        String   @id
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Client {
+  id           Int          @id @default(autoincrement())
+  name         String
+  email        String
+  phone        String?
+  company      String
+  status       ClientStatus @default(Active)
+  projects     Int          @default(0)
+  totalRevenue Float        @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  leads          Lead[]
+  proposals      Proposal[]
+  contracts      Contract[]
+  projectRecords Project[]
+  invoices       Invoice[]
+  payments       Payment[]
+}
+
+model Lead {
+  id        Int        @id @default(autoincrement())
+  name      String
+  email     String
+  company   String
+  phone     String?
+  source    String
+  value     Float      @default(0)
+  status    LeadStatus @default(New)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  clientId Int?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model Proposal {
+  id          Int            @id @default(autoincrement())
+  number      String
+  title       String
+  client      String
+  clientEmail String
+  project     String
+  amount      Float
+  status      ProposalStatus @default(Draft)
+  issueDate   DateTime
+  validUntil  DateTime
+  description String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  clientId     Int?
+  clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model Contract {
+  id          Int            @id @default(autoincrement())
+  number      String
+  title       String
+  client      String
+  clientEmail String
+  project     String
+  value       Float
+  status      ContractStatus @default(Draft)
+  startDate   DateTime
+  endDate     DateTime
+  description String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  clientId     Int?
+  clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model Project {
+  id          Int           @id @default(autoincrement())
+  name        String
+  client      String
+  clientEmail String
+  description String
+  status      ProjectStatus @default(Planning)
+  startDate   DateTime
+  dueDate     DateTime
+  budget      Float
+  progress    Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  clientId     Int?
+  clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  tasks       Task[]
+  timeEntries TimeEntry[]
+  invoices    Invoice[]
+  payments    Payment[]
+  expenses    Expense[]
+}
+
+model Task {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  projectId   Int
+  projectName String
+  status      TaskStatus   @default(ToDo)
+  priority    TaskPriority @default(Medium)
+  dueDate     DateTime
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model TimeEntry {
+  id          Int      @id @default(autoincrement())
+  description String
+  projectId   Int
+  projectName String
+  taskId      Int?
+  taskName    String?
+  date        DateTime
+  duration    Int
+  billable    Boolean  @default(true)
+  hourlyRate  Float    @default(0)
+  createdAt   DateTime @default(now())
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id          Int           @id @default(autoincrement())
+  number      String        @unique
+  client      String
+  clientEmail String
+  project     String
+  amount      Float
+  status      InvoiceStatus @default(Draft)
+  issueDate   DateTime
+  dueDate     DateTime
+  description String
+  tax         Float         @default(0)
+  discount    Float         @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  clientId     Int?
+  clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  projectId     Int?
+  projectRecord Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  items    InvoiceItem[]
+  payments Payment[]
+}
+
+model InvoiceItem {
+  id          Int    @id @default(autoincrement())
+  description String
+  quantity    Float
+  rate        Float
+
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  paymentNumber String        @unique
+  clientName    String
+  invoiceNumber String
+  projectName   String
+  amount        Float
+  date          DateTime
+  method        PaymentMethod
+  status        PaymentStatus
+  createdAt     DateTime      @default(now())
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  clientId     Int?
+  clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  invoiceId Int?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  projectId     Int?
+  projectRecord Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+}
+
+model Expense {
+  id          Int             @id @default(autoincrement())
+  title       String
+  description String
+  category    ExpenseCategory
+  amount      Float
+  date        DateTime
+  status      ExpenseStatus
+  project     String?
+  vendor      String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  projectId     Int?
+  projectRecord Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+}
+
+model Conversation {
+  id          Int      @id @default(autoincrement())
+  name        String
+  company     String
+  initials    String
+  gradient    String
+  online      Boolean  @default(false)
+  unread      Int      @default(0)
+  starred     Boolean  @default(false)
+  lastMessage String
+  lastTime    DateTime @default(now())
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  messages Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Message {
+  id     Int      @id @default(autoincrement())
+  text   String
+  sender String
+  time   DateTime @default(now())
+  read   Boolean  @default(false)
+
+  conversationId Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model File {
+  id          Int      @id @default(autoincrement())
+  name        String
+  type        String
+  size        Int
+  storagePath String
+  folder      String
+  shared      Boolean  @default(false)
+  client      String?
+  project     String?
+  clientId    Int?
+  projectId   Int?
+  userId      Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([projectId])
+  @@index([folder])
+}
+
+model Settings {
+  id Int @id @default(autoincrement())
+
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  workspaceName String @default("")
+  website       String @default("")
+  industry      String @default("Technology")
+  timezone      String @default("Asia/Kolkata")
+  currency      String @default("INR (₹)")
+
+  notificationEmail     Boolean @default(true)
+  notificationProjects  Boolean @default(true)
+  notificationInvoices  Boolean @default(true)
+  notificationTasks     Boolean @default(true)
+  notificationWeekly    Boolean @default(true)
+  notificationMarketing Boolean @default(false)
+
+  appearance String @default("system")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}

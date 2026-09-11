@@ -1,0 +1,5010 @@
+========== clients.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const clientSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  email: z.string().email("Invalid email address"),
+  phone: z.string().optional(),
+  company: z.string().min(2, "Company is required"),
+  status: z.enum(["Active", "Inactive"]).default("Active"),
+  projects: z.number().int().min(0).default(0),
+  totalRevenue: z.number().min(0).default(0),
+});
+
+const updateClientSchema = clientSchema.partial();
+
+/**
+ * GET /api/clients
+ * Get all clients
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const clients = await prisma.client.findMany({
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: clients,
+    });
+  } catch (error) {
+    console.error("GET /api/clients error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch clients",
+    });
+  }
+});
+
+/**
+ * GET /api/clients/:id
+ * Get one client
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client ID",
+      });
+    }
+
+    const client = await prisma.client.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: "Client not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: client,
+    });
+  } catch (error) {
+    console.error("GET /api/clients/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch client",
+    });
+  }
+});
+
+/**
+ * POST /api/clients
+ * Create a client
+ */
+router.post("/", async (req, res) => {
+  try {
+    const result = clientSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: result.error.flatten(),
+      });
+    }
+
+    const data = result.data;
+
+    // Temporary user until authentication is implemented.
+    const user = await prisma.user.upsert({
+      where: {
+        email: "demo@freelanceos.local",
+      },
+      update: {},
+      create: {
+        name: "FreelanceOS Demo User",
+        email: "demo@freelanceos.local",
+      },
+    });
+
+    const client = await prisma.client.create({
+  data: {
+    name: data.name,
+    email: data.email,
+    company: data.company,
+    status: data.status,
+    projects: data.projects,
+    totalRevenue: data.totalRevenue,
+    userId: user.id,
+    ...(data.phone !== undefined && {
+      phone: data.phone,
+    }),
+  },
+});
+
+    return res.status(201).json({
+      success: true,
+      message: "Client created successfully",
+      data: client,
+    });
+  } catch (error) {
+    console.error("POST /api/clients error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create client",
+    });
+  }
+});
+
+/**
+ * PATCH /api/clients/:id
+ * Update a client
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client ID",
+      });
+    }
+
+    const result = updateClientSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: result.error.flatten(),
+      });
+    }
+
+    const existingClient = await prisma.client.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (!existingClient) {
+      return res.status(404).json({
+        success: false,
+        message: "Client not found",
+      });
+    }
+
+    const updateData = Object.fromEntries(
+  Object.entries(result.data).filter(([, value]) => value !== undefined)
+);
+
+const client = await prisma.client.update({
+  where: {
+    id,
+  },
+  data: updateData,
+});
+
+    return res.status(200).json({
+      success: true,
+      message: "Client updated successfully",
+      data: client,
+    });
+  } catch (error) {
+    console.error("PATCH /api/clients/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update client",
+    });
+  }
+});
+
+/**
+ * DELETE /api/clients/:id
+ * Delete a client
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client ID",
+      });
+    }
+
+    const existingClient = await prisma.client.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (!existingClient) {
+      return res.status(404).json({
+        success: false,
+        message: "Client not found",
+      });
+    }
+
+    await prisma.client.delete({
+      where: {
+        id,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Client deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/clients/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete client",
+    });
+  }
+});
+
+export default router;
+
+========== contracts.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const contractStatusSchema = z.enum([
+  "Draft",
+  "Sent",
+  "Viewed",
+  "Signed",
+  "Expired",
+  "Cancelled",
+]);
+
+const createContractSchema = z.object({
+  number: z.string().trim().min(1).max(50),
+  title: z.string().trim().min(1).max(200),
+  client: z.string().trim().min(1).max(160),
+  clientEmail: z.string().trim().email().max(255),
+  project: z.string().trim().min(1).max(200),
+  value: z.number().finite().nonnegative(),
+  status: contractStatusSchema.optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  description: z.string().max(10000).optional(),
+});
+
+const updateContractSchema = z.object({
+  number: z.string().trim().min(1).max(50).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  client: z.string().trim().min(1).max(160).optional(),
+  clientEmail: z.string().trim().email().max(255).optional(),
+  project: z.string().trim().min(1).max(200).optional(),
+  value: z.number().finite().nonnegative().optional(),
+  status: contractStatusSchema.optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  description: z.string().max(10000).optional(),
+});
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      email: "demo@freelanceos.local",
+      name: "Demo User",
+    },
+  });
+}
+
+/**
+ * GET /api/contracts
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const contracts = await prisma.contract.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: contracts,
+    });
+  } catch (error) {
+    console.error("GET /api/contracts error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch contracts",
+    });
+  }
+});
+
+/**
+ * GET /api/contracts/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid contract ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const contract = await prisma.contract.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!contract) {
+      res.status(404).json({
+        success: false,
+        message: "Contract not found",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: contract,
+    });
+  } catch (error) {
+    console.error("GET /api/contracts/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch contract",
+    });
+  }
+});
+
+/**
+ * POST /api/contracts
+ */
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createContractSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid contract data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const startDate = parsed.data.startDate
+      ? new Date(parsed.data.startDate)
+      : new Date();
+
+    const endDate = parsed.data.endDate
+      ? new Date(parsed.data.endDate)
+      : new Date(
+          startDate.getTime() + 30 * 24 * 60 * 60 * 1000
+        );
+
+    const contract = await prisma.contract.create({
+      data: {
+        userId: user.id,
+        number: parsed.data.number,
+        title: parsed.data.title,
+        client: parsed.data.client,
+        clientEmail: parsed.data.clientEmail,
+        project: parsed.data.project,
+        value: parsed.data.value,
+        status: parsed.data.status ?? "Draft",
+        startDate,
+        endDate,
+        description: parsed.data.description ?? "",
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Contract created successfully",
+      data: contract,
+    });
+  } catch (error) {
+    console.error("POST /api/contracts error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create contract",
+    });
+  }
+});
+
+/**
+ * PATCH /api/contracts/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid contract ID",
+      });
+      return;
+    }
+
+    const parsed = updateContractSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid contract data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingContract = await prisma.contract.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingContract) {
+      res.status(404).json({
+        success: false,
+        message: "Contract not found",
+      });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+
+    if (parsed.data.number !== undefined) {
+      updateData.number = parsed.data.number;
+    }
+
+    if (parsed.data.title !== undefined) {
+      updateData.title = parsed.data.title;
+    }
+
+    if (parsed.data.client !== undefined) {
+      updateData.client = parsed.data.client;
+    }
+
+    if (parsed.data.clientEmail !== undefined) {
+      updateData.clientEmail = parsed.data.clientEmail;
+    }
+
+    if (parsed.data.project !== undefined) {
+      updateData.project = parsed.data.project;
+    }
+
+    if (parsed.data.value !== undefined) {
+      updateData.value = parsed.data.value;
+    }
+
+    if (parsed.data.status !== undefined) {
+      updateData.status = parsed.data.status;
+    }
+
+    if (parsed.data.startDate !== undefined) {
+      updateData.startDate = new Date(parsed.data.startDate);
+    }
+
+    if (parsed.data.endDate !== undefined) {
+      updateData.endDate = new Date(parsed.data.endDate);
+    }
+
+    if (parsed.data.description !== undefined) {
+      updateData.description = parsed.data.description;
+    }
+
+    const contract = await prisma.contract.update({
+      where: {
+        id,
+      },
+      data: updateData,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Contract updated successfully",
+      data: contract,
+    });
+  } catch (error) {
+    console.error("PATCH /api/contracts/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update contract",
+    });
+  }
+});
+
+/**
+ * DELETE /api/contracts/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid contract ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingContract = await prisma.contract.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingContract) {
+      res.status(404).json({
+        success: false,
+        message: "Contract not found",
+      });
+      return;
+    }
+
+    await prisma.contract.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Contract deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/contracts/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete contract",
+    });
+  }
+});
+
+export default router;
+
+========== dashboard.ts ==========
+import { Router } from "express";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+async function getDemoUser() {
+  let user = await prisma.user.findFirst({
+    orderBy: {
+      id: "asc",
+    },
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        name: "Demo Freelancer",
+        email: "demo@freelanceos.local",
+      },
+    });
+  }
+
+  return user;
+}
+
+router.get("/", async (req, res) => {
+  try {
+    const yearValue = Number(
+      req.query.year || new Date().getFullYear(),
+    );
+
+    if (
+      !Number.isInteger(yearValue) ||
+      yearValue < 2000 ||
+      yearValue > 2100
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year.",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    /*
+     * Dashboard date ranges
+     *
+     * We use UTC boundaries so the database queries are
+     * predictable and consistent.
+     */
+    const now = new Date();
+
+    const currentMonthStart = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        1,
+      ),
+    );
+
+    const nextMonthStart = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth() + 1,
+        1,
+      ),
+    );
+
+    const yearStart = new Date(
+      Date.UTC(yearValue, 0, 1),
+    );
+
+    const nextYearStart = new Date(
+      Date.UTC(yearValue + 1, 0, 1),
+    );
+
+    /*
+     * Fetch dashboard data in parallel.
+     */
+    const [
+      currentMonthPayments,
+      outstandingInvoices,
+      activeClients,
+      currentMonthTimeEntries,
+      yearlyPayments,
+      activeProjects,
+      recentInvoices,
+    ] = await Promise.all([
+      // Revenue this month
+      prisma.payment.findMany({
+        where: {
+          userId: user.id,
+          status: "Completed",
+          date: {
+            gte: currentMonthStart,
+            lt: nextMonthStart,
+          },
+        },
+        select: {
+          amount: true,
+        },
+      }),
+
+      // Outstanding invoices
+      prisma.invoice.findMany({
+        where: {
+          userId: user.id,
+          status: {
+            in: ["Sent", "Viewed", "Overdue"],
+          },
+        },
+        select: {
+          id: true,
+          number: true,
+          client: true,
+          amount: true,
+          status: true,
+          issueDate: true,
+          dueDate: true,
+        },
+        orderBy: {
+          issueDate: "desc",
+        },
+      }),
+
+      // Active clients
+      prisma.client.count({
+        where: {
+          userId: user.id,
+          status: "Active",
+        },
+      }),
+
+      // Hours worked this month
+      prisma.timeEntry.findMany({
+        where: {
+          userId: user.id,
+          date: {
+            gte: currentMonthStart,
+            lt: nextMonthStart,
+          },
+        },
+        select: {
+          duration: true,
+        },
+      }),
+
+      // Payments for selected year
+      prisma.payment.findMany({
+        where: {
+          userId: user.id,
+          status: "Completed",
+          date: {
+            gte: yearStart,
+            lt: nextYearStart,
+          },
+        },
+        select: {
+          amount: true,
+          date: true,
+        },
+        orderBy: {
+          date: "asc",
+        },
+      }),
+
+      // Active projects
+      prisma.project.findMany({
+        where: {
+          userId: user.id,
+          status: {
+            in: ["Planning", "InProgress", "Review"],
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          client: true,
+          progress: true,
+          budget: true,
+          status: true,
+          startDate: true,
+          dueDate: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+        take: 5,
+      }),
+
+      // Recent invoices
+      prisma.invoice.findMany({
+        where: {
+          userId: user.id,
+        },
+        select: {
+          id: true,
+          number: true,
+          client: true,
+          amount: true,
+          status: true,
+          issueDate: true,
+        },
+        orderBy: {
+          issueDate: "desc",
+        },
+        take: 5,
+      }),
+    ]);
+
+    /*
+     * Calculate revenue this month.
+     */
+    const revenueThisMonth = currentMonthPayments.reduce(
+      (total, payment) => total + payment.amount,
+      0,
+    );
+
+    /*
+     * Calculate outstanding invoice total.
+     */
+    const outstandingInvoiceTotal = outstandingInvoices.reduce(
+      (total, invoice) => total + invoice.amount,
+      0,
+    );
+
+    /*
+     * TimeEntry.duration is stored as an integer.
+     * The frontend displays hours, so convert minutes to hours.
+     */
+    const minutesWorkedThisMonth = currentMonthTimeEntries.reduce(
+      (total, entry) => total + entry.duration,
+      0,
+    );
+
+    const hoursWorkedThisMonth =
+      minutesWorkedThisMonth / 60;
+
+    /*
+     * Build monthly revenue for the selected year.
+     */
+    const monthlyRevenue = Array.from(
+      { length: 12 },
+      () => 0,
+    );
+
+    for (const payment of yearlyPayments) {
+      const month = payment.date.getUTCMonth();
+
+        monthlyRevenue[month] =
+        (monthlyRevenue[month] ?? 0) + payment.amount;
+    }
+
+    /*
+     * The existing dashboard chart expects percentage-style
+     * values from 0 to 100.
+     *
+     * Convert actual monthly revenue into relative bar heights.
+     */
+    const maximumMonthlyRevenue = Math.max(
+      ...monthlyRevenue,
+      0,
+    );
+
+    const revenueChart = monthlyRevenue.map((amount) => {
+      if (maximumMonthlyRevenue === 0) {
+        return 0;
+      }
+
+      return Math.round(
+        (amount / maximumMonthlyRevenue) * 100,
+      );
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        year: yearValue,
+
+        stats: {
+          revenueThisMonth,
+          outstandingInvoices: outstandingInvoiceTotal,
+          outstandingInvoiceCount:
+            outstandingInvoices.length,
+          activeClients,
+          hoursWorked: Number(
+            hoursWorkedThisMonth.toFixed(1),
+          ),
+        },
+
+        revenue: {
+          monthly: monthlyRevenue,
+          chart: revenueChart,
+        },
+
+        projects: activeProjects,
+
+        invoices: recentInvoices,
+
+        outstandingInvoices,
+      },
+    });
+  } catch (error) {
+    console.error("GET /api/dashboard error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load dashboard.",
+    });
+  }
+});
+
+export default router;
+
+========== expenses.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const expenseSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  category: z.enum([
+    "Software",
+    "Marketing",
+    "Travel",
+    "Office",
+    "Equipment",
+    "Utilities",
+    "Other",
+  ]),
+  amount: z.number().nonnegative(),
+  date: z.coerce.date(),
+  status: z.enum(["Paid", "Pending"]),
+  project: z.string().nullable().optional(),
+  vendor: z.string().nullable().optional(),
+  projectId: z.number().int().positive().nullable().optional(),
+});
+
+const updateExpenseSchema = expenseSchema.partial();
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      name: "Demo Freelancer",
+      email: "demo@freelanceos.local",
+    },
+  });
+}
+
+async function validateProject(
+  userId: number,
+  projectId: number | null | undefined,
+) {
+  if (projectId === undefined || projectId === null) {
+    return;
+  }
+
+  const project = await prisma.project.findFirst({
+    where: {
+      id: projectId,
+      userId,
+    },
+  });
+
+  if (!project) {
+    throw new Error("Project not found");
+  }
+}
+
+/**
+ * GET /api/expenses
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const expenses = await prisma.expense.findMany({
+      where: {
+        userId: user.id,
+      },
+      include: {
+        projectRecord: true,
+      },
+      orderBy: {
+        date: "desc",
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: expenses,
+    });
+  } catch (error) {
+    console.error("GET /api/expenses error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch expenses",
+    });
+  }
+});
+
+/**
+ * GET /api/expenses/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const user = await getDemoUser();
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID",
+      });
+    }
+
+    const expense = await prisma.expense.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+      include: {
+        projectRecord: true,
+      },
+    });
+
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: expense,
+    });
+  } catch (error) {
+    console.error("GET /api/expenses/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch expense",
+    });
+  }
+});
+
+/**
+ * POST /api/expenses
+ */
+router.post("/", async (req, res) => {
+  try {
+    const data = expenseSchema.parse(req.body);
+    const user = await getDemoUser();
+
+    await validateProject(
+      user.id,
+      data.projectId,
+    );
+
+    const expense = await prisma.expense.create({
+      data: {
+        title: data.title,
+        description: data.description ?? "",
+        category: data.category,
+        amount: data.amount,
+        date: data.date,
+        status: data.status,
+
+        ...(data.project !== undefined
+          ? { project: data.project }
+          : {}),
+
+        ...(data.vendor !== undefined
+          ? { vendor: data.vendor }
+          : {}),
+
+        ...(data.projectId !== undefined
+          ? { projectId: data.projectId }
+          : {}),
+
+        userId: user.id,
+      },
+      include: {
+        projectRecord: true,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: expense,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense data",
+        errors: error.flatten(),
+      });
+    }
+
+    console.error("POST /api/expenses error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create expense",
+    });
+  }
+});
+
+/**
+ * PATCH /api/expenses/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const user = await getDemoUser();
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID",
+      });
+    }
+
+    const data = updateExpenseSchema.parse(req.body);
+
+    const existingExpense = await prisma.expense.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingExpense) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found",
+      });
+    }
+
+    await validateProject(
+      user.id,
+      data.projectId,
+    );
+
+    const expense = await prisma.expense.update({
+      where: {
+        id,
+      },
+      data: {
+        ...(data.title !== undefined
+          ? { title: data.title }
+          : {}),
+
+        ...(data.description !== undefined
+          ? { description: data.description }
+          : {}),
+
+        ...(data.category !== undefined
+          ? { category: data.category }
+          : {}),
+
+        ...(data.amount !== undefined
+          ? { amount: data.amount }
+          : {}),
+
+        ...(data.date !== undefined
+          ? { date: data.date }
+          : {}),
+
+        ...(data.status !== undefined
+          ? { status: data.status }
+          : {}),
+
+        ...(data.project !== undefined
+          ? { project: data.project }
+          : {}),
+
+        ...(data.vendor !== undefined
+          ? { vendor: data.vendor }
+          : {}),
+
+        ...(data.projectId !== undefined
+          ? { projectId: data.projectId }
+          : {}),
+      },
+      include: {
+        projectRecord: true,
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: expense,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense data",
+        errors: error.flatten(),
+      });
+    }
+
+    console.error("PATCH /api/expenses/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update expense",
+    });
+  }
+});
+
+/**
+ * DELETE /api/expenses/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const user = await getDemoUser();
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID",
+      });
+    }
+
+    const existingExpense = await prisma.expense.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingExpense) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found",
+      });
+    }
+
+    await prisma.expense.delete({
+      where: {
+        id,
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: "Expense deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/expenses/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete expense",
+    });
+  }
+});
+
+export default router;
+
+========== files.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import multer from "multer";
+import path from "node:path";
+import fs from "node:fs";
+import crypto from "node:crypto";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const uploadDirectory = path.resolve(
+  process.cwd(),
+  "uploads"
+);
+
+fs.mkdirSync(uploadDirectory, {
+  recursive: true,
+});
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadDirectory);
+  },
+
+  filename: (_req, file, cb) => {
+    const extension = path.extname(file.originalname);
+    const filename = `${crypto.randomUUID()}${extension}`;
+
+    cb(null, filename);
+  },
+});
+
+const upload = multer({
+  storage,
+
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+  },
+});
+
+const fileTypeSchema = z.enum([
+  "PDF",
+  "DOC",
+  "XLS",
+  "IMAGE",
+  "ZIP",
+  "CODE",
+  "OTHER",
+]);
+
+const createFileSchema = z.object({
+  folder: z.string().min(1).default("General"),
+  shared: z.coerce.boolean().default(false),
+  client: z.string().nullable().optional(),
+  project: z.string().nullable().optional(),
+  clientId: z.coerce.number().int().nullable().optional(),
+  projectId: z.coerce.number().int().nullable().optional(),
+});
+
+const updateFileSchema = z.object({
+  name: z.string().min(1).optional(),
+  folder: z.string().min(1).optional(),
+  shared: z.coerce.boolean().optional(),
+  client: z.string().nullable().optional(),
+  project: z.string().nullable().optional(),
+  clientId: z.coerce.number().int().nullable().optional(),
+  projectId: z.coerce.number().int().nullable().optional(),
+});
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      name: "Demo Freelancer",
+      email: "demo@freelanceos.local",
+    },
+  });
+}
+
+function detectFileType(filename: string) {
+  const extension = path
+    .extname(filename)
+    .replace(".", "")
+    .toLowerCase();
+
+  if (extension === "pdf") {
+    return "PDF";
+  }
+
+  if (["doc", "docx"].includes(extension)) {
+    return "DOC";
+  }
+
+  if (
+    ["xls", "xlsx", "csv"].includes(extension)
+  ) {
+    return "XLS";
+  }
+
+  if (
+    ["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(
+      extension
+    )
+  ) {
+    return "IMAGE";
+  }
+
+  if (
+    ["zip", "rar", "7z"].includes(extension)
+  ) {
+    return "ZIP";
+  }
+
+  if (
+    [
+      "js",
+      "ts",
+      "tsx",
+      "jsx",
+      "html",
+      "css",
+      "json",
+      "md",
+    ].includes(extension)
+  ) {
+    return "CODE";
+  }
+
+  return "OTHER";
+}
+
+/**
+ * GET /api/files
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const files = await prisma.file.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: files,
+    });
+  } catch (error) {
+    console.error("GET /api/files error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch files.",
+    });
+  }
+});
+
+/**
+ * GET /api/files/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file ID.",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const file = await prisma.file.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: "File not found.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: file,
+    });
+  } catch (error) {
+    console.error(
+      "GET /api/files/:id error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch file.",
+    });
+  }
+});
+
+/**
+ * POST /api/files/upload
+ *
+ * Upload the actual binary file and create its
+ * database metadata in one operation.
+ */
+router.post(
+  "/upload",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "No file was uploaded.",
+        });
+      }
+
+      const parsed = createFileSchema.safeParse(
+        req.body
+      );
+
+      if (!parsed.success) {
+        fs.unlinkSync(req.file.path);
+
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file data.",
+          errors: parsed.error.flatten(),
+        });
+      }
+
+      const data = parsed.data;
+      const user = await getDemoUser();
+
+      if (
+        data.projectId !== null &&
+        data.projectId !== undefined
+      ) {
+        const project =
+          await prisma.project.findFirst({
+            where: {
+              id: data.projectId,
+              userId: user.id,
+            },
+          });
+
+        if (!project) {
+          fs.unlinkSync(req.file.path);
+
+          return res.status(400).json({
+            success: false,
+            message: "Project not found.",
+          });
+        }
+      }
+
+      const file = await prisma.file.create({
+        data: {
+          name: req.file.originalname,
+          type: detectFileType(
+            req.file.originalname
+          ),
+          size: req.file.size,
+          storagePath: req.file.filename,
+          folder: data.folder,
+          shared: data.shared,
+
+          ...(data.client !== undefined
+            ? { client: data.client }
+            : {}),
+
+          ...(data.project !== undefined
+            ? { project: data.project }
+            : {}),
+
+          ...(data.clientId !== undefined
+            ? { clientId: data.clientId }
+            : {}),
+
+          ...(data.projectId !== undefined
+            ? { projectId: data.projectId }
+            : {}),
+
+          userId: user.id,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "File uploaded successfully.",
+        data: file,
+      });
+    } catch (error) {
+      if (req.file?.path) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          // Ignore cleanup errors.
+        }
+      }
+
+      console.error(
+        "POST /api/files/upload error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to upload file.",
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/files/:id/download
+ *
+ * Download the actual stored binary file.
+ */
+router.get(
+  "/:id/download",
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file ID.",
+        });
+      }
+
+      const user = await getDemoUser();
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id,
+          userId: user.id,
+        },
+      });
+
+      if (!file) {
+        return res.status(404).json({
+          success: false,
+          message: "File not found.",
+        });
+      }
+
+      const filePath = path.join(
+        uploadDirectory,
+        path.basename(file.storagePath)
+      );
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          success: false,
+          message: "Stored file could not be found.",
+        });
+      }
+
+      return res.download(
+        filePath,
+        file.name
+      );
+    } catch (error) {
+      console.error(
+        "GET /api/files/:id/download error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to download file.",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/files/:id/duplicate
+ *
+ * Duplicate both the database record and the
+ * actual stored binary.
+ */
+router.post(
+  "/:id/duplicate",
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file ID.",
+        });
+      }
+
+      const user = await getDemoUser();
+
+      const existingFile =
+        await prisma.file.findFirst({
+          where: {
+            id,
+            userId: user.id,
+          },
+        });
+
+      if (!existingFile) {
+        return res.status(404).json({
+          success: false,
+          message: "File not found.",
+        });
+      }
+
+      const sourcePath = path.join(
+        uploadDirectory,
+        path.basename(
+          existingFile.storagePath
+        )
+      );
+
+      if (!fs.existsSync(sourcePath)) {
+        return res.status(404).json({
+          success: false,
+          message: "Stored file could not be found.",
+        });
+      }
+
+      const extension = path.extname(
+        existingFile.name
+      );
+
+      const newStorageName = `${crypto.randomUUID()}${extension}`;
+
+      const destinationPath = path.join(
+        uploadDirectory,
+        newStorageName
+      );
+
+      fs.copyFileSync(
+        sourcePath,
+        destinationPath
+      );
+
+      try {
+        const duplicate =
+          await prisma.file.create({
+            data: {
+              name: `Copy of ${existingFile.name}`,
+              type: existingFile.type,
+              size: existingFile.size,
+              storagePath: newStorageName,
+              folder: existingFile.folder,
+              shared: false,
+              client: existingFile.client,
+              project: existingFile.project,
+              clientId: existingFile.clientId,
+              projectId: existingFile.projectId,
+              userId: user.id,
+            },
+          });
+
+        return res.status(201).json({
+          success: true,
+          message: "File duplicated successfully.",
+          data: duplicate,
+        });
+      } catch (error) {
+        fs.unlinkSync(destinationPath);
+        throw error;
+      }
+    } catch (error) {
+      console.error(
+        "POST /api/files/:id/duplicate error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to duplicate file.",
+      });
+    }
+  }
+);
+
+/**
+ * PATCH /api/files/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file ID.",
+      });
+    }
+
+    const parsed = updateFileSchema.safeParse(
+      req.body
+    );
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file data.",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const data = parsed.data;
+    const user = await getDemoUser();
+
+    const existingFile =
+      await prisma.file.findFirst({
+        where: {
+          id,
+          userId: user.id,
+        },
+      });
+
+    if (!existingFile) {
+      return res.status(404).json({
+        success: false,
+        message: "File not found.",
+      });
+    }
+
+    if (
+      data.projectId !== null &&
+      data.projectId !== undefined
+    ) {
+      const project =
+        await prisma.project.findFirst({
+          where: {
+            id: data.projectId,
+            userId: user.id,
+          },
+        });
+
+      if (!project) {
+        return res.status(400).json({
+          success: false,
+          message: "Project not found.",
+        });
+      }
+    }
+
+    const file = await prisma.file.update({
+      where: {
+        id,
+      },
+      data: {
+        ...(data.name !== undefined
+          ? { name: data.name }
+          : {}),
+
+        ...(data.folder !== undefined
+          ? { folder: data.folder }
+          : {}),
+
+        ...(data.shared !== undefined
+          ? { shared: data.shared }
+          : {}),
+
+        ...(data.client !== undefined
+          ? { client: data.client }
+          : {}),
+
+        ...(data.project !== undefined
+          ? { project: data.project }
+          : {}),
+
+        ...(data.clientId !== undefined
+          ? { clientId: data.clientId }
+          : {}),
+
+        ...(data.projectId !== undefined
+          ? { projectId: data.projectId }
+          : {}),
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: "File updated successfully.",
+      data: file,
+    });
+  } catch (error) {
+    console.error(
+      "PATCH /api/files/:id error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update file.",
+    });
+  }
+});
+
+/**
+ * DELETE /api/files/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file ID.",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const existingFile =
+      await prisma.file.findFirst({
+        where: {
+          id,
+          userId: user.id,
+        },
+      });
+
+    if (!existingFile) {
+      return res.status(404).json({
+        success: false,
+        message: "File not found.",
+      });
+    }
+
+    const filePath = path.join(
+      uploadDirectory,
+      path.basename(
+        existingFile.storagePath
+      )
+    );
+
+    await prisma.file.delete({
+      where: {
+        id,
+      },
+    });
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    return res.json({
+      success: true,
+      message: "File deleted successfully.",
+    });
+  } catch (error) {
+    console.error(
+      "DELETE /api/files/:id error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete file.",
+    });
+  }
+});
+
+export default router;
+
+========== invoices.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const invoiceStatusSchema = z.enum([
+  "Draft",
+  "Sent",
+  "Viewed",
+  "Paid",
+  "Overdue",
+  "Cancelled",
+]);
+
+const invoiceItemSchema = z.object({
+  description: z.string().min(1).max(500),
+  quantity: z.number().positive(),
+  rate: z.number().nonnegative(),
+});
+
+const createInvoiceSchema = z.object({
+  number: z.string().min(1).max(100),
+  client: z.string().min(1).max(200),
+  clientEmail: z.string().email(),
+  project: z.string().min(1).max(200),
+  amount: z.number().nonnegative(),
+  status: invoiceStatusSchema.optional(),
+  issueDate: z.coerce.date(),
+  dueDate: z.coerce.date(),
+  description: z.string().max(2000).default(""),
+  tax: z.number().nonnegative().optional(),
+  discount: z.number().nonnegative().optional(),
+  clientId: z.number().int().positive().optional().nullable(),
+  projectId: z.number().int().positive().optional().nullable(),
+  items: z.array(invoiceItemSchema).optional(),
+});
+
+const updateInvoiceSchema = createInvoiceSchema.partial();
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      name: "Demo Freelancer",
+      email: "demo@freelanceos.local",
+    },
+  });
+}
+
+async function validateRelations(
+  userId: number,
+  clientId?: number | null,
+  projectId?: number | null,
+) {
+  if (clientId !== undefined && clientId !== null) {
+    const client = await prisma.client.findFirst({
+      where: {
+        id: clientId,
+        userId,
+      },
+    });
+
+    if (!client) {
+      throw new Error("Client not found");
+    }
+  }
+
+  if (projectId !== undefined && projectId !== null) {
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        userId,
+      },
+    });
+
+    if (!project) {
+      throw new Error("Project not found");
+    }
+  }
+}
+
+/**
+ * GET /api/invoices
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        userId: user.id,
+      },
+      include: {
+        items: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.json({
+      success: true,
+      data: invoices,
+    });
+  } catch (error) {
+    console.error("GET /api/invoices error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch invoices",
+    });
+  }
+});
+
+/**
+ * GET /api/invoices/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice ID",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const invoice = await prisma.invoice.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+      include: {
+        items: true,
+      },
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: invoice,
+    });
+  } catch (error) {
+    console.error("GET /api/invoices/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch invoice",
+    });
+  }
+});
+
+/**
+ * POST /api/invoices
+ */
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createInvoiceSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice data",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const data = parsed.data;
+    const user = await getDemoUser();
+
+    await validateRelations(
+      user.id,
+      data.clientId,
+      data.projectId,
+    );
+
+    const existingInvoice = await prisma.invoice.findUnique({
+      where: {
+        number: data.number,
+      },
+    });
+
+    if (existingInvoice) {
+      return res.status(409).json({
+        success: false,
+        message: "Invoice number already exists",
+      });
+    }
+
+    const createData = {
+      number: data.number,
+      client: data.client,
+      clientEmail: data.clientEmail,
+      project: data.project,
+      amount: data.amount,
+      status: data.status ?? "Draft",
+      issueDate: data.issueDate,
+      dueDate: data.dueDate,
+      description: data.description,
+      tax: data.tax ?? 0,
+      discount: data.discount ?? 0,
+      userId: user.id,
+      clientId: data.clientId ?? null,
+      projectId: data.projectId ?? null,
+      ...(data.items && data.items.length > 0
+        ? {
+            items: {
+              create: data.items.map((item) => ({
+                description: item.description,
+                quantity: item.quantity,
+                rate: item.rate,
+              })),
+            },
+          }
+        : {}),
+    };
+
+    const invoice = await prisma.invoice.create({
+      data: createData,
+      include: {
+        items: true,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Invoice created successfully",
+      data: invoice,
+    });
+  } catch (error) {
+    console.error("POST /api/invoices error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create invoice",
+    });
+  }
+});
+
+/**
+ * PATCH /api/invoices/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice ID",
+      });
+    }
+
+    const parsed = updateInvoiceSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice data",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const data = parsed.data;
+    const user = await getDemoUser();
+
+    const existingInvoice = await prisma.invoice.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingInvoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found",
+      });
+    }
+
+    await validateRelations(
+      user.id,
+      data.clientId,
+      data.projectId,
+    );
+
+    if (
+      data.number &&
+      data.number !== existingInvoice.number
+    ) {
+      const duplicate = await prisma.invoice.findUnique({
+        where: {
+          number: data.number,
+        },
+      });
+
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          message: "Invoice number already exists",
+        });
+      }
+    }
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      if (data.items !== undefined) {
+        await tx.invoiceItem.deleteMany({
+          where: {
+            invoiceId: id,
+          },
+        });
+      }
+
+      return tx.invoice.update({
+        where: {
+          id,
+        },
+        data: {
+          ...(data.number !== undefined && {
+            number: data.number,
+          }),
+          ...(data.client !== undefined && {
+            client: data.client,
+          }),
+          ...(data.clientEmail !== undefined && {
+            clientEmail: data.clientEmail,
+          }),
+          ...(data.project !== undefined && {
+            project: data.project,
+          }),
+          ...(data.amount !== undefined && {
+            amount: data.amount,
+          }),
+          ...(data.status !== undefined && {
+            status: data.status,
+          }),
+          ...(data.issueDate !== undefined && {
+            issueDate: data.issueDate,
+          }),
+          ...(data.dueDate !== undefined && {
+            dueDate: data.dueDate,
+          }),
+          ...(data.description !== undefined && {
+            description: data.description,
+          }),
+          ...(data.tax !== undefined && {
+            tax: data.tax,
+          }),
+          ...(data.discount !== undefined && {
+            discount: data.discount,
+          }),
+          ...(data.clientId !== undefined && {
+            clientId: data.clientId,
+          }),
+          ...(data.projectId !== undefined && {
+            projectId: data.projectId,
+          }),
+
+          ...(data.items !== undefined && {
+            items: {
+              create: data.items.map((item) => ({
+                description: item.description,
+                quantity: item.quantity,
+                rate: item.rate,
+              })),
+            },
+          }),
+        },
+        include: {
+          items: true,
+        },
+      });
+    });
+
+    res.json({
+      success: true,
+      message: "Invoice updated successfully",
+      data: invoice,
+    });
+  } catch (error) {
+    console.error("PATCH /api/invoices/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update invoice",
+    });
+  }
+});
+
+/**
+ * DELETE /api/invoices/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice ID",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const invoice = await prisma.invoice.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found",
+      });
+    }
+
+    await prisma.invoice.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Invoice deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/invoices/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete invoice",
+    });
+  }
+});
+
+export default router;
+
+========== leads.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const leadStatusSchema = z.enum([
+  "New",
+  "Contacted",
+  "Qualified",
+  "Proposal",
+  "Won",
+  "Lost",
+]);
+
+const leadSourceSchema = z.enum([
+  "Website",
+  "LinkedIn",
+  "Referral",
+  "Instagram",
+  "Facebook",
+  "Cold Email",
+  "Other",
+]);
+
+const createLeadSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(255),
+  company: z.string().trim().min(1).max(160),
+  phone: z.string().trim().max(40).optional(),
+  source: leadSourceSchema,
+  value: z.number().finite().nonnegative(),
+  status: leadStatusSchema.optional(),
+});
+
+const updateLeadSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  email: z.string().trim().email().max(255).optional(),
+  company: z.string().trim().min(1).max(160).optional(),
+  phone: z.string().trim().max(40).optional(),
+  source: leadSourceSchema.optional(),
+  value: z.number().finite().nonnegative().optional(),
+  status: leadStatusSchema.optional(),
+});
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      email: "demo@freelanceos.local",
+      name: "Demo User",
+    },
+  });
+}
+
+/*
+ * GET /api/leads
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const leads = await prisma.lead.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: leads,
+    });
+  } catch (error) {
+    console.error("GET /api/leads error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch leads",
+    });
+  }
+});
+
+/*
+ * GET /api/leads/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid lead ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!lead) {
+      res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: lead,
+    });
+  } catch (error) {
+    console.error("GET /api/leads/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch lead",
+    });
+  }
+});
+
+/*
+ * POST /api/leads
+ */
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createLeadSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid lead data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const data = {
+      userId: user.id,
+      name: parsed.data.name,
+      email: parsed.data.email,
+      company: parsed.data.company,
+      source: parsed.data.source,
+      value: parsed.data.value,
+      status: parsed.data.status ?? "New",
+      ...(parsed.data.phone !== undefined
+        ? { phone: parsed.data.phone }
+        : {}),
+    };
+
+    const lead = await prisma.lead.create({
+      data,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Lead created successfully",
+      data: lead,
+    });
+  } catch (error) {
+    console.error("POST /api/leads error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create lead",
+    });
+  }
+});
+
+/*
+ * PATCH /api/leads/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid lead ID",
+      });
+      return;
+    }
+
+    const parsed = updateLeadSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid lead data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingLead =
+      await prisma.lead.findFirst({
+        where: {
+          id,
+          userId: user.id,
+        },
+      });
+
+    if (!existingLead) {
+      res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+      return;
+    }
+
+    const updateData = Object.fromEntries(
+      Object.entries(parsed.data).filter(
+        ([, value]) => value !== undefined
+      )
+    );
+
+    const lead = await prisma.lead.update({
+      where: {
+        id,
+      },
+      data: updateData,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Lead updated successfully",
+      data: lead,
+    });
+  } catch (error) {
+    console.error("PATCH /api/leads/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update lead",
+    });
+  }
+});
+
+/*
+ * DELETE /api/leads/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid lead ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingLead =
+      await prisma.lead.findFirst({
+        where: {
+          id,
+          userId: user.id,
+        },
+      });
+
+    if (!existingLead) {
+      res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+      return;
+    }
+
+    await prisma.lead.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Lead deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/leads/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete lead",
+    });
+  }
+});
+
+export default router;
+
+========== payments.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const paymentSchema = z.object({
+  paymentNumber: z.string().min(1),
+  clientName: z.string().min(1),
+  invoiceNumber: z.string().min(1),
+  projectName: z.string().min(1),
+  amount: z.number().nonnegative(),
+  date: z.coerce.date(),
+  method: z.enum(["UPI", "BankTransfer", "Card", "Cash"]),
+  status: z.enum(["Completed", "Pending", "Failed"]),
+  clientId: z.number().int().positive().nullable().optional(),
+  invoiceId: z.number().int().positive().nullable().optional(),
+  projectId: z.number().int().positive().nullable().optional(),
+});
+
+const updatePaymentSchema = paymentSchema.partial();
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      name: "Demo Freelancer",
+      email: "demo@freelanceos.local",
+    },
+  });
+}
+
+async function validateRelations(
+  userId: number,
+  data: {
+    clientId?: number | null | undefined;
+    invoiceId?: number | null | undefined;
+    projectId?: number | null | undefined;
+  },
+) {
+  if (data.clientId !== undefined && data.clientId !== null) {
+    const client = await prisma.client.findFirst({
+      where: {
+        id: data.clientId,
+        userId,
+      },
+    });
+
+    if (!client) {
+      throw new Error("Client not found");
+    }
+  }
+
+  if (data.invoiceId !== undefined && data.invoiceId !== null) {
+    const invoice = await prisma.invoice.findFirst({
+      where: {
+        id: data.invoiceId,
+        userId,
+      },
+    });
+
+    if (!invoice) {
+      throw new Error("Invoice not found");
+    }
+  }
+
+  if (data.projectId !== undefined && data.projectId !== null) {
+    const project = await prisma.project.findFirst({
+      where: {
+        id: data.projectId,
+        userId,
+      },
+    });
+
+    if (!project) {
+      throw new Error("Project not found");
+    }
+  }
+}
+
+/**
+ * GET /api/payments
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const payments = await prisma.payment.findMany({
+      where: {
+        userId: user.id,
+      },
+      include: {
+        clientRecord: true,
+        invoice: true,
+        projectRecord: true,
+      },
+      orderBy: {
+        date: "desc",
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: payments,
+    });
+  } catch (error) {
+    console.error("GET /api/payments error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payments",
+    });
+  }
+});
+
+/**
+ * GET /api/payments/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const user = await getDemoUser();
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment ID",
+      });
+    }
+
+    const payment = await prisma.payment.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+      include: {
+        clientRecord: true,
+        invoice: true,
+        projectRecord: true,
+      },
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: payment,
+    });
+  } catch (error) {
+    console.error("GET /api/payments/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payment",
+    });
+  }
+});
+
+/**
+ * POST /api/payments
+ */
+router.post("/", async (req, res) => {
+  try {
+    const data = paymentSchema.parse(req.body);
+    const user = await getDemoUser();
+
+    await validateRelations(user.id, data);
+
+    const existingPayment = await prisma.payment.findUnique({
+      where: {
+        paymentNumber: data.paymentNumber,
+      },
+    });
+
+    if (existingPayment) {
+      return res.status(409).json({
+        success: false,
+        message: "Payment number already exists",
+      });
+    }
+
+    const payment = await prisma.payment.create({
+      data: {
+        paymentNumber: data.paymentNumber,
+        clientName: data.clientName,
+        invoiceNumber: data.invoiceNumber,
+        projectName: data.projectName,
+        amount: data.amount,
+        date: data.date,
+        method: data.method,
+        status: data.status,
+        createdAt: new Date(),
+        userId: user.id,
+
+        ...(data.clientId !== undefined
+          ? { clientId: data.clientId }
+          : {}),
+
+        ...(data.invoiceId !== undefined
+          ? { invoiceId: data.invoiceId }
+          : {}),
+
+        ...(data.projectId !== undefined
+          ? { projectId: data.projectId }
+          : {}),
+      },
+      include: {
+        clientRecord: true,
+        invoice: true,
+        projectRecord: true,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: payment,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment data",
+        errors: error.flatten(),
+      });
+    }
+
+    console.error("POST /api/payments error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create payment",
+    });
+  }
+});
+
+/**
+ * PATCH /api/payments/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const user = await getDemoUser();
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment ID",
+      });
+    }
+
+    const data = updatePaymentSchema.parse(req.body);
+
+    const existingPayment = await prisma.payment.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingPayment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
+    await validateRelations(user.id, data);
+
+    if (data.paymentNumber) {
+      const duplicate = await prisma.payment.findFirst({
+        where: {
+          paymentNumber: data.paymentNumber,
+          id: {
+            not: id,
+          },
+        },
+      });
+
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          message: "Payment number already exists",
+        });
+      }
+    }
+
+    const payment = await prisma.payment.update({
+      where: {
+        id,
+      },
+      data: {
+        ...(data.paymentNumber !== undefined
+          ? { paymentNumber: data.paymentNumber }
+          : {}),
+
+        ...(data.clientName !== undefined
+          ? { clientName: data.clientName }
+          : {}),
+
+        ...(data.invoiceNumber !== undefined
+          ? { invoiceNumber: data.invoiceNumber }
+          : {}),
+
+        ...(data.projectName !== undefined
+          ? { projectName: data.projectName }
+          : {}),
+
+        ...(data.amount !== undefined
+          ? { amount: data.amount }
+          : {}),
+
+        ...(data.date !== undefined
+          ? { date: data.date }
+          : {}),
+
+        ...(data.method !== undefined
+          ? { method: data.method }
+          : {}),
+
+        ...(data.status !== undefined
+          ? { status: data.status }
+          : {}),
+
+        ...(data.clientId !== undefined
+          ? { clientId: data.clientId }
+          : {}),
+
+        ...(data.invoiceId !== undefined
+          ? { invoiceId: data.invoiceId }
+          : {}),
+
+        ...(data.projectId !== undefined
+          ? { projectId: data.projectId }
+          : {}),
+      },
+      include: {
+        clientRecord: true,
+        invoice: true,
+        projectRecord: true,
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: payment,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment data",
+        errors: error.flatten(),
+      });
+    }
+
+    console.error("PATCH /api/payments/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update payment",
+    });
+  }
+});
+
+/**
+ * DELETE /api/payments/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const user = await getDemoUser();
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment ID",
+      });
+    }
+
+    const existingPayment = await prisma.payment.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingPayment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
+    await prisma.payment.delete({
+      where: {
+        id,
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: "Payment deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/payments/:id error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete payment",
+    });
+  }
+});
+
+export default router;
+
+========== projects.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const projectStatusSchema = z.enum([
+  "Planning",
+  "InProgress",
+  "Review",
+  "Completed",
+  "OnHold",
+]);
+
+const createProjectSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  client: z.string().trim().min(1).max(160),
+  clientEmail: z.string().trim().email().max(255),
+  description: z.string().max(10000).optional(),
+  status: projectStatusSchema.optional(),
+  startDate: z.string().datetime().optional(),
+  dueDate: z.string().datetime().optional(),
+  budget: z.number().finite().nonnegative(),
+  progress: z.number().finite().min(0).max(100).optional(),
+});
+
+const updateProjectSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  client: z.string().trim().min(1).max(160).optional(),
+  clientEmail: z.string().trim().email().max(255).optional(),
+  description: z.string().max(10000).optional(),
+  status: projectStatusSchema.optional(),
+  startDate: z.string().datetime().optional(),
+  dueDate: z.string().datetime().optional(),
+  budget: z.number().finite().nonnegative().optional(),
+  progress: z.number().finite().min(0).max(100).optional(),
+});
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      email: "demo@freelanceos.local",
+      name: "Demo User",
+    },
+  });
+}
+
+/**
+ * GET /api/projects
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const projects = await prisma.project.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: projects,
+    });
+  } catch (error) {
+    console.error("GET /api/projects error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch projects",
+    });
+  }
+});
+
+/**
+ * GET /api/projects/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const project = await prisma.project.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!project) {
+      res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: project,
+    });
+  } catch (error) {
+    console.error("GET /api/projects/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch project",
+    });
+  }
+});
+
+/**
+ * POST /api/projects
+ */
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createProjectSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid project data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const startDate = parsed.data.startDate
+      ? new Date(parsed.data.startDate)
+      : new Date();
+
+    const dueDate = parsed.data.dueDate
+      ? new Date(parsed.data.dueDate)
+      : new Date(
+          startDate.getTime() +
+            30 * 24 * 60 * 60 * 1000
+        );
+
+    const project = await prisma.project.create({
+      data: {
+        userId: user.id,
+        name: parsed.data.name,
+        client: parsed.data.client,
+        clientEmail: parsed.data.clientEmail,
+        description: parsed.data.description ?? "",
+        status: parsed.data.status ?? "Planning",
+        startDate,
+        dueDate,
+        budget: parsed.data.budget,
+        progress: parsed.data.progress ?? 0,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Project created successfully",
+      data: project,
+    });
+  } catch (error) {
+    console.error("POST /api/projects error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create project",
+    });
+  }
+});
+
+/**
+ * PATCH /api/projects/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+      return;
+    }
+
+    const parsed = updateProjectSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid project data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingProject = await prisma.project.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingProject) {
+      res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+
+    if (parsed.data.name !== undefined) {
+      updateData.name = parsed.data.name;
+    }
+
+    if (parsed.data.client !== undefined) {
+      updateData.client = parsed.data.client;
+    }
+
+    if (parsed.data.clientEmail !== undefined) {
+      updateData.clientEmail = parsed.data.clientEmail;
+    }
+
+    if (parsed.data.description !== undefined) {
+      updateData.description = parsed.data.description;
+    }
+
+    if (parsed.data.status !== undefined) {
+      updateData.status = parsed.data.status;
+    }
+
+    if (parsed.data.startDate !== undefined) {
+      updateData.startDate = new Date(
+        parsed.data.startDate
+      );
+    }
+
+    if (parsed.data.dueDate !== undefined) {
+      updateData.dueDate = new Date(
+        parsed.data.dueDate
+      );
+    }
+
+    if (parsed.data.budget !== undefined) {
+      updateData.budget = parsed.data.budget;
+    }
+
+    if (parsed.data.progress !== undefined) {
+      updateData.progress = parsed.data.progress;
+    }
+
+    const project = await prisma.project.update({
+      where: {
+        id,
+      },
+      data: updateData,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Project updated successfully",
+      data: project,
+    });
+  } catch (error) {
+    console.error("PATCH /api/projects/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update project",
+    });
+  }
+});
+
+/**
+ * DELETE /api/projects/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid project ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingProject = await prisma.project.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingProject) {
+      res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+      return;
+    }
+
+    await prisma.project.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Project deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/projects/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete project",
+    });
+  }
+});
+
+export default router;
+
+========== proposals.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const proposalStatusSchema = z.enum([
+  "Draft",
+  "Sent",
+  "Viewed",
+  "Accepted",
+  "Rejected",
+  "Expired",
+]);
+
+const createProposalSchema = z.object({
+  number: z.string().trim().min(1).max(50),
+  title: z.string().trim().min(1).max(200),
+  client: z.string().trim().min(1).max(160),
+  clientEmail: z.string().trim().email().max(255),
+  project: z.string().trim().min(1).max(200),
+  amount: z.number().finite().nonnegative(),
+  status: proposalStatusSchema.optional(),
+  issueDate: z.string().datetime().optional(),
+  validUntil: z.string().datetime().optional(),
+  description: z.string().max(5000).optional(),
+});
+
+const updateProposalSchema = z.object({
+  number: z.string().trim().min(1).max(50).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  client: z.string().trim().min(1).max(160).optional(),
+  clientEmail: z.string().trim().email().max(255).optional(),
+  project: z.string().trim().min(1).max(200).optional(),
+  amount: z.number().finite().nonnegative().optional(),
+  status: proposalStatusSchema.optional(),
+  issueDate: z.string().datetime().optional(),
+  validUntil: z.string().datetime().optional(),
+  description: z.string().max(5000).optional(),
+});
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      email: "demo@freelanceos.local",
+      name: "Demo User",
+    },
+  });
+}
+
+/**
+ * GET /api/proposals
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const proposals = await prisma.proposal.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: proposals,
+    });
+  } catch (error) {
+    console.error("GET /api/proposals error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch proposals",
+    });
+  }
+});
+
+/**
+ * GET /api/proposals/:id
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid proposal ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const proposal = await prisma.proposal.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!proposal) {
+      res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: proposal,
+    });
+  } catch (error) {
+    console.error("GET /api/proposals/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch proposal",
+    });
+  }
+});
+
+/**
+ * POST /api/proposals
+ */
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createProposalSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid proposal data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+   
+const issueDate = parsed.data.issueDate
+  ? new Date(parsed.data.issueDate)
+  : new Date();
+
+const validUntil = parsed.data.validUntil
+  ? new Date(parsed.data.validUntil)
+  : new Date(issueDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+const data = {
+  userId: user.id,
+  number: parsed.data.number,
+  title: parsed.data.title,
+  client: parsed.data.client,
+  clientEmail: parsed.data.clientEmail,
+  project: parsed.data.project,
+  amount: parsed.data.amount,
+  status: parsed.data.status ?? "Draft",
+  issueDate,
+  validUntil,
+  description: parsed.data.description ?? "",
+};
+
+    const proposal = await prisma.proposal.create({
+      data,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Proposal created successfully",
+      data: proposal,
+    });
+  } catch (error) {
+    console.error("POST /api/proposals error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create proposal",
+    });
+  }
+});
+
+/**
+ * PATCH /api/proposals/:id
+ */
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid proposal ID",
+      });
+      return;
+    }
+
+    const parsed = updateProposalSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid proposal data",
+        errors: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingProposal = await prisma.proposal.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingProposal) {
+      res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+
+    if (parsed.data.number !== undefined) {
+      updateData.number = parsed.data.number;
+    }
+
+    if (parsed.data.title !== undefined) {
+      updateData.title = parsed.data.title;
+    }
+
+    if (parsed.data.client !== undefined) {
+      updateData.client = parsed.data.client;
+    }
+
+    if (parsed.data.clientEmail !== undefined) {
+      updateData.clientEmail = parsed.data.clientEmail;
+    }
+
+    if (parsed.data.project !== undefined) {
+      updateData.project = parsed.data.project;
+    }
+
+    if (parsed.data.amount !== undefined) {
+      updateData.amount = parsed.data.amount;
+    }
+
+    if (parsed.data.status !== undefined) {
+      updateData.status = parsed.data.status;
+    }
+
+    if (parsed.data.issueDate !== undefined) {
+      updateData.issueDate = new Date(parsed.data.issueDate);
+    }
+
+    if (parsed.data.validUntil !== undefined) {
+      updateData.validUntil = new Date(parsed.data.validUntil);
+    }
+
+    if (parsed.data.description !== undefined) {
+      updateData.description = parsed.data.description;
+    }
+
+    const proposal = await prisma.proposal.update({
+      where: {
+        id,
+      },
+      data: updateData,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Proposal updated successfully",
+      data: proposal,
+    });
+  } catch (error) {
+    console.error("PATCH /api/proposals/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update proposal",
+    });
+  }
+});
+
+/**
+ * DELETE /api/proposals/:id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid proposal ID",
+      });
+      return;
+    }
+
+    const user = await getDemoUser();
+
+    const existingProposal = await prisma.proposal.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingProposal) {
+      res.status(404).json({
+        success: false,
+        message: "Proposal not found",
+      });
+      return;
+    }
+
+    await prisma.proposal.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Proposal deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /api/proposals/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete proposal",
+    });
+  }
+});
+
+export default router;
+
+========== reports.ts ==========
+import { Router } from "express";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+async function getDemoUser() {
+  let user = await prisma.user.findFirst({
+    orderBy: {
+      id: "asc",
+    },
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        name: "Demo Freelancer",
+        email: "demo@freelanceos.local",
+      },
+    });
+  }
+
+  return user;
+}
+
+/**
+ * GET /api/reports?year=2026
+ *
+ * Returns the source data required by the Reports dashboard.
+ * Calculations remain transparent and can be performed by the frontend.
+ */
+router.get("/", async (req, res) => {
+  try {
+    const yearValue = Number(req.query.year || new Date().getFullYear());
+
+    if (
+      !Number.isInteger(yearValue) ||
+      yearValue < 2000 ||
+      yearValue > 2100
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year.",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const startDate = new Date(
+      `${yearValue}-01-01T00:00:00.000Z`
+    );
+
+    const endDate = new Date(
+      `${yearValue + 1}-01-01T00:00:00.000Z`
+    );
+
+    const [
+      projects,
+      invoices,
+      payments,
+      expenses,
+      clients,
+    ] = await Promise.all([
+      prisma.project.findMany({
+        where: {
+          userId: user.id,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      }),
+
+      prisma.invoice.findMany({
+        where: {
+          userId: user.id,
+          issueDate: {
+            gte: startDate,
+            lt: endDate,
+          },
+        },
+        orderBy: {
+          issueDate: "desc",
+        },
+      }),
+
+      prisma.payment.findMany({
+        where: {
+          userId: user.id,
+          date: {
+            gte: startDate,
+            lt: endDate,
+          },
+        },
+        orderBy: {
+          date: "desc",
+        },
+      }),
+
+      prisma.expense.findMany({
+        where: {
+          userId: user.id,
+          date: {
+            gte: startDate,
+            lt: endDate,
+          },
+        },
+        orderBy: {
+          date: "desc",
+        },
+      }),
+
+      prisma.client.findMany({
+        where: {
+          userId: user.id,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        year: yearValue,
+        projects,
+        invoices,
+        payments,
+        expenses,
+        clients,
+      },
+    });
+  } catch (error) {
+    console.error("GET /api/reports error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load reports.",
+    });
+  }
+});
+
+export default router;
+
+========== settings.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const settingsSchema = z.object({
+  profile: z.object({
+    firstName: z.string().min(1),
+    lastName: z.string(),
+    email: z.string().email(),
+    phone: z.string(),
+    role: z.string(),
+    bio: z.string(),
+  }),
+
+  workspace: z.object({
+    name: z.string().min(1),
+    website: z.string(),
+    industry: z.string(),
+    timezone: z.string(),
+    currency: z.string(),
+  }),
+
+  notifications: z.object({
+    email: z.boolean(),
+    projects: z.boolean(),
+    invoices: z.boolean(),
+    tasks: z.boolean(),
+    weekly: z.boolean(),
+    marketing: z.boolean(),
+  }),
+
+  appearance: z.enum(["light", "dark", "system"]),
+});
+
+async function getDemoUser() {
+  let user = await prisma.user.findFirst({
+    orderBy: {
+      id: "asc",
+    },
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        name: "Demo Freelancer",
+        email: "demo@freelanceos.local",
+      },
+    });
+  }
+
+  return user;
+}
+
+async function getOrCreateSettings(userId: number) {
+  return prisma.settings.upsert({
+    where: {
+      userId,
+    },
+    update: {},
+    create: {
+      userId,
+      workspaceName: "Samiya's Workspace",
+      website: "https://example.com",
+      industry: "Technology",
+      timezone: "Asia/Kolkata",
+      currency: "INR (₹)",
+    },
+  });
+}
+
+/**
+ * GET /api/settings
+ */
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+    const settings = await getOrCreateSettings(user.id);
+
+    const firstName =
+      user.firstName ||
+      user.name.split(" ")[0] ||
+      "";
+
+    const lastName =
+      user.lastName ||
+      user.name.split(" ").slice(1).join(" ") ||
+      "";
+
+    return res.json({
+      success: true,
+      data: {
+        profile: {
+          firstName,
+          lastName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          bio: user.bio,
+        },
+
+        workspace: {
+          name: settings.workspaceName,
+          website: settings.website,
+          industry: settings.industry,
+          timezone: settings.timezone,
+          currency: settings.currency,
+        },
+
+        notifications: {
+          email: settings.notificationEmail,
+          projects: settings.notificationProjects,
+          invoices: settings.notificationInvoices,
+          tasks: settings.notificationTasks,
+          weekly: settings.notificationWeekly,
+          marketing: settings.notificationMarketing,
+        },
+
+        appearance: settings.appearance,
+      },
+    });
+  } catch (error) {
+    console.error("GET /api/settings error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load settings.",
+    });
+  }
+});
+
+/**
+ * PATCH /api/settings
+ */
+router.patch("/", async (req, res) => {
+  try {
+    const parsed = settingsSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid settings data.",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const { profile, workspace, notifications, appearance } = parsed.data;
+
+    const user = await getDemoUser();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          phone: profile.phone,
+          role: profile.role,
+          bio: profile.bio,
+          name: `${profile.firstName} ${profile.lastName}`.trim(),
+        },
+      });
+
+      const updatedSettings = await tx.settings.upsert({
+        where: {
+          userId: user.id,
+        },
+        update: {
+          workspaceName: workspace.name,
+          website: workspace.website,
+          industry: workspace.industry,
+          timezone: workspace.timezone,
+          currency: workspace.currency,
+
+          notificationEmail: notifications.email,
+          notificationProjects: notifications.projects,
+          notificationInvoices: notifications.invoices,
+          notificationTasks: notifications.tasks,
+          notificationWeekly: notifications.weekly,
+          notificationMarketing: notifications.marketing,
+
+          appearance,
+        },
+        create: {
+          userId: user.id,
+
+          workspaceName: workspace.name,
+          website: workspace.website,
+          industry: workspace.industry,
+          timezone: workspace.timezone,
+          currency: workspace.currency,
+
+          notificationEmail: notifications.email,
+          notificationProjects: notifications.projects,
+          notificationInvoices: notifications.invoices,
+          notificationTasks: notifications.tasks,
+          notificationWeekly: notifications.weekly,
+          notificationMarketing: notifications.marketing,
+
+          appearance,
+        },
+      });
+
+      return {
+        user: updatedUser,
+        settings: updatedSettings,
+      };
+    });
+
+    return res.json({
+      success: true,
+      message: "Settings updated successfully.",
+      data: {
+        profile: {
+          firstName: updated.user.firstName,
+          lastName: updated.user.lastName,
+          email: updated.user.email,
+          phone: updated.user.phone,
+          role: updated.user.role,
+          bio: updated.user.bio,
+        },
+
+        workspace: {
+          name: updated.settings.workspaceName,
+          website: updated.settings.website,
+          industry: updated.settings.industry,
+          timezone: updated.settings.timezone,
+          currency: updated.settings.currency,
+        },
+
+        notifications: {
+          email: updated.settings.notificationEmail,
+          projects: updated.settings.notificationProjects,
+          invoices: updated.settings.notificationInvoices,
+          tasks: updated.settings.notificationTasks,
+          weekly: updated.settings.notificationWeekly,
+          marketing: updated.settings.notificationMarketing,
+        },
+
+        appearance: updated.settings.appearance,
+      },
+    });
+  } catch (error) {
+    console.error("PATCH /api/settings error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update settings.",
+    });
+  }
+});
+
+export default router;
+
+========== tasks.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const taskStatusSchema = z.enum([
+  "ToDo",
+  "InProgress",
+  "Review",
+  "Done",
+]);
+
+const taskPrioritySchema = z.enum([
+  "Low",
+  "Medium",
+  "High",
+  "Urgent",
+]);
+
+const createTaskSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(10000).optional(),
+  projectId: z.number().int().positive(),
+  dueDate: z.string().datetime(),
+  status: taskStatusSchema.optional(),
+  priority: taskPrioritySchema.optional(),
+});
+
+const updateTaskSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(10000).optional(),
+  projectId: z.number().int().positive().optional(),
+  dueDate: z.string().datetime().optional(),
+  status: taskStatusSchema.optional(),
+  priority: taskPrioritySchema.optional(),
+});
+
+function toPrismaStatus(status: string) {
+  switch (status) {
+    case "ToDo":
+      return "ToDo";
+    case "InProgress":
+      return "InProgress";
+    case "Review":
+      return "Review";
+    case "Done":
+      return "Done";
+    default:
+      return "ToDo";
+  }
+}
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      email: "demo@freelanceos.local",
+      name: "Demo User",
+    },
+  });
+}
+
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const tasks = await prisma.task.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.json({
+      success: true,
+      data: tasks,
+    });
+  } catch (error) {
+    console.error("Failed to fetch tasks:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch tasks",
+    });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid task ID",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const task = await prisma.task.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: task,
+    });
+  } catch (error) {
+    console.error("Failed to fetch task:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch task",
+    });
+  }
+});
+
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createTaskSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid task data",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const project = await prisma.project.findFirst({
+      where: {
+        id: parsed.data.projectId,
+        userId: user.id,
+      },
+    });
+
+    if (!project) {
+      return res.status(400).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const task = await prisma.task.create({
+      data: {
+        userId: user.id,
+        title: parsed.data.title,
+        description: parsed.data.description ?? "",
+        projectId: project.id,
+        projectName: project.name,
+        dueDate: new Date(parsed.data.dueDate),
+        status: toPrismaStatus(parsed.data.status ?? "ToDo"),
+        priority: parsed.data.priority ?? "Medium",
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Task created successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Failed to create task:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create task",
+    });
+  }
+});
+
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid task ID",
+      });
+    }
+
+    const parsed = updateTaskSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid task data",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const existingTask = await prisma.task.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingTask) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    const updateData: {
+      title?: string;
+      description?: string;
+      projectId?: number;
+      projectName?: string;
+      dueDate?: Date;
+      status?: "ToDo" | "InProgress" | "Review" | "Done";
+      priority?: "Low" | "Medium" | "High" | "Urgent";
+    } = {};
+
+    if (parsed.data.title !== undefined) {
+      updateData.title = parsed.data.title;
+    }
+
+    if (parsed.data.description !== undefined) {
+      updateData.description = parsed.data.description;
+    }
+
+    if (parsed.data.projectId !== undefined) {
+      const project = await prisma.project.findFirst({
+        where: {
+          id: parsed.data.projectId,
+          userId: user.id,
+        },
+      });
+
+      if (!project) {
+        return res.status(400).json({
+          success: false,
+          message: "Project not found",
+        });
+      }
+
+      updateData.projectId = project.id;
+      updateData.projectName = project.name;
+    }
+
+    if (parsed.data.dueDate !== undefined) {
+      updateData.dueDate = new Date(parsed.data.dueDate);
+    }
+
+    if (parsed.data.status !== undefined) {
+      updateData.status = toPrismaStatus(parsed.data.status) as
+        | "ToDo"
+        | "InProgress"
+        | "Review"
+        | "Done";
+    }
+
+    if (parsed.data.priority !== undefined) {
+      updateData.priority = parsed.data.priority;
+    }
+
+    const task = await prisma.task.update({
+      where: {
+        id,
+      },
+      data: updateData,
+    });
+
+    res.json({
+      success: true,
+      message: "Task updated successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Failed to update task:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update task",
+    });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid task ID",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const existingTask = await prisma.task.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingTask) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    await prisma.task.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Task deleted successfully",
+    });
+  } catch (error) {
+    console.error("Failed to delete task:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete task",
+    });
+  }
+});
+
+export default router;
+
+========== time.ts ==========
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma.js";
+
+const router = Router();
+
+const createTimeEntrySchema = z.object({
+  description: z.string().trim().min(1).max(500),
+  projectId: z.number().int().positive(),
+  taskId: z.number().int().positive().optional(),
+  date: z.string().datetime(),
+  duration: z.number().int().positive(),
+  billable: z.boolean().optional(),
+  hourlyRate: z.number().min(0).optional(),
+});
+
+const updateTimeEntrySchema = z.object({
+  description: z.string().trim().min(1).max(500).optional(),
+  projectId: z.number().int().positive().optional(),
+  taskId: z.number().int().positive().nullable().optional(),
+  date: z.string().datetime().optional(),
+  duration: z.number().int().positive().optional(),
+  billable: z.boolean().optional(),
+  hourlyRate: z.number().min(0).optional(),
+});
+
+async function getDemoUser() {
+  return prisma.user.upsert({
+    where: {
+      email: "demo@freelanceos.local",
+    },
+    update: {},
+    create: {
+      email: "demo@freelanceos.local",
+      name: "Demo User",
+    },
+  });
+}
+
+router.get("/", async (_req, res) => {
+  try {
+    const user = await getDemoUser();
+
+    const entries = await prisma.timeEntry.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: [
+        {
+          date: "desc",
+        },
+        {
+          createdAt: "desc",
+        },
+      ],
+    });
+
+    res.json({
+      success: true,
+      data: entries,
+    });
+  } catch (error) {
+    console.error("Failed to fetch time entries:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch time entries",
+    });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time entry ID",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const entry = await prisma.timeEntry.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!entry) {
+      return res.status(404).json({
+        success: false,
+        message: "Time entry not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: entry,
+    });
+  } catch (error) {
+    console.error("Failed to fetch time entry:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch time entry",
+    });
+  }
+});
+
+router.post("/", async (req, res) => {
+  try {
+    const parsed = createTimeEntrySchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time entry data",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const project = await prisma.project.findFirst({
+      where: {
+        id: parsed.data.projectId,
+        userId: user.id,
+      },
+    });
+
+    if (!project) {
+      return res.status(400).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    let taskId: number | null = null;
+    let taskName: string | null = null;
+
+    if (parsed.data.taskId !== undefined) {
+      const task = await prisma.task.findFirst({
+        where: {
+          id: parsed.data.taskId,
+          projectId: project.id,
+          userId: user.id,
+        },
+      });
+
+      if (!task) {
+        return res.status(400).json({
+          success: false,
+          message: "Task not found for the selected project",
+        });
+      }
+
+      taskId = task.id;
+      taskName = task.title;
+    }
+
+    const entry = await prisma.timeEntry.create({
+      data: {
+        userId: user.id,
+        description: parsed.data.description,
+        projectId: project.id,
+        projectName: project.name,
+        taskId,
+        taskName,
+        date: new Date(parsed.data.date),
+        duration: parsed.data.duration,
+        billable: parsed.data.billable ?? true,
+        hourlyRate: parsed.data.hourlyRate ?? 0,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Time entry created successfully",
+      data: entry,
+    });
+  } catch (error) {
+    console.error("Failed to create time entry:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create time entry",
+    });
+  }
+});
+
+router.patch("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time entry ID",
+      });
+    }
+
+    const parsed = updateTimeEntrySchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time entry data",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const existingEntry = await prisma.timeEntry.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingEntry) {
+      return res.status(404).json({
+        success: false,
+        message: "Time entry not found",
+      });
+    }
+
+    const updateData: {
+      description?: string;
+      projectId?: number;
+      projectName?: string;
+      taskId?: number | null;
+      taskName?: string | null;
+      date?: Date;
+      duration?: number;
+      billable?: boolean;
+      hourlyRate?: number;
+    } = {};
+
+    if (parsed.data.description !== undefined) {
+      updateData.description = parsed.data.description;
+    }
+
+    if (parsed.data.date !== undefined) {
+      updateData.date = new Date(parsed.data.date);
+    }
+
+    if (parsed.data.duration !== undefined) {
+      updateData.duration = parsed.data.duration;
+    }
+
+    if (parsed.data.billable !== undefined) {
+      updateData.billable = parsed.data.billable;
+    }
+
+    if (parsed.data.hourlyRate !== undefined) {
+      updateData.hourlyRate = parsed.data.hourlyRate;
+    }
+
+    let selectedProjectId = existingEntry.projectId;
+
+    if (parsed.data.projectId !== undefined) {
+      const project = await prisma.project.findFirst({
+        where: {
+          id: parsed.data.projectId,
+          userId: user.id,
+        },
+      });
+
+      if (!project) {
+        return res.status(400).json({
+          success: false,
+          message: "Project not found",
+        });
+      }
+
+      selectedProjectId = project.id;
+
+      updateData.projectId = project.id;
+      updateData.projectName = project.name;
+    }
+
+    if (parsed.data.taskId !== undefined) {
+      if (parsed.data.taskId === null) {
+        updateData.taskId = null;
+        updateData.taskName = null;
+      } else {
+        const task = await prisma.task.findFirst({
+          where: {
+            id: parsed.data.taskId,
+            projectId: selectedProjectId,
+            userId: user.id,
+          },
+        });
+
+        if (!task) {
+          return res.status(400).json({
+            success: false,
+            message: "Task not found for the selected project",
+          });
+        }
+
+        updateData.taskId = task.id;
+        updateData.taskName = task.title;
+      }
+    } else if (
+      parsed.data.projectId !== undefined &&
+      existingEntry.taskId !== null
+    ) {
+      const existingTask = await prisma.task.findFirst({
+        where: {
+          id: existingEntry.taskId,
+          projectId: selectedProjectId,
+          userId: user.id,
+        },
+      });
+
+      if (!existingTask) {
+        updateData.taskId = null;
+        updateData.taskName = null;
+      }
+    }
+
+    const entry = await prisma.timeEntry.update({
+      where: {
+        id,
+      },
+      data: updateData,
+    });
+
+    res.json({
+      success: true,
+      message: "Time entry updated successfully",
+      data: entry,
+    });
+  } catch (error) {
+    console.error("Failed to update time entry:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update time entry",
+    });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time entry ID",
+      });
+    }
+
+    const user = await getDemoUser();
+
+    const existingEntry = await prisma.timeEntry.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!existingEntry) {
+      return res.status(404).json({
+        success: false,
+        message: "Time entry not found",
+      });
+    }
+
+    await prisma.timeEntry.delete({
+      where: {
+        id,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Time entry deleted successfully",
+    });
+  } catch (error) {
+    console.error("Failed to delete time entry:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete time entry",
+    });
+  }
+});
+
+export default router;
+
