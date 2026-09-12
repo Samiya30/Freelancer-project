@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useAuth } from "@/lib/auth/AuthContext";
 import AppShell from "../components/layout/AppShell";
 import {
   getDashboard,
@@ -367,8 +368,12 @@ export default function Dashboard() {
   const displayedInvoices =
     invoices.slice(0, 4);
 
-  const greetingName = "Samiya";
+const { user } = useAuth();
 
+const greetingName =
+  user?.firstName ||
+  user?.name ||
+  "Freelancer";
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">

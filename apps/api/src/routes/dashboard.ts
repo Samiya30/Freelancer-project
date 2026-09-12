@@ -1,25 +1,23 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-async function getDemoUser() {
-  let user = await prisma.user.findFirst({
-    orderBy: {
-      id: "asc",
-    },
-  });
+router.use(requireAuth);
 
-  if (!user) {
-    user = await prisma.user.create({
-      data: {
-        name: "Demo Freelancer",
-        email: "demo@freelanceos.local",
-      },
-    });
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
+
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
   }
 
-  return user;
+  return userId;
 }
 
 router.get("/", async (req, res) => {
@@ -39,7 +37,7 @@ router.get("/", async (req, res) => {
       });
     }
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     /*
      * Dashboard date ranges
@@ -88,7 +86,7 @@ router.get("/", async (req, res) => {
       // Revenue this month
       prisma.payment.findMany({
         where: {
-          userId: user.id,
+          userId,
           status: "Completed",
           date: {
             gte: currentMonthStart,
@@ -103,7 +101,7 @@ router.get("/", async (req, res) => {
       // Outstanding invoices
       prisma.invoice.findMany({
         where: {
-          userId: user.id,
+          userId,
           status: {
             in: ["Sent", "Viewed", "Overdue"],
           },
@@ -125,7 +123,7 @@ router.get("/", async (req, res) => {
       // Active clients
       prisma.client.count({
         where: {
-          userId: user.id,
+          userId,
           status: "Active",
         },
       }),
@@ -133,7 +131,7 @@ router.get("/", async (req, res) => {
       // Hours worked this month
       prisma.timeEntry.findMany({
         where: {
-          userId: user.id,
+          userId,
           date: {
             gte: currentMonthStart,
             lt: nextMonthStart,
@@ -147,7 +145,7 @@ router.get("/", async (req, res) => {
       // Payments for selected year
       prisma.payment.findMany({
         where: {
-          userId: user.id,
+          userId,
           status: "Completed",
           date: {
             gte: yearStart,
@@ -166,7 +164,7 @@ router.get("/", async (req, res) => {
       // Active projects
       prisma.project.findMany({
         where: {
-          userId: user.id,
+          userId,
           status: {
             in: ["Planning", "InProgress", "Review"],
           },
@@ -190,7 +188,7 @@ router.get("/", async (req, res) => {
       // Recent invoices
       prisma.invoice.findMany({
         where: {
-          userId: user.id,
+          userId,
         },
         select: {
           id: true,
@@ -210,27 +208,33 @@ router.get("/", async (req, res) => {
     /*
      * Calculate revenue this month.
      */
-    const revenueThisMonth = currentMonthPayments.reduce(
-      (total, payment) => total + payment.amount,
-      0,
-    );
+    const revenueThisMonth =
+      currentMonthPayments.reduce(
+        (total, payment) =>
+          total + payment.amount,
+        0,
+      );
 
     /*
      * Calculate outstanding invoice total.
      */
-    const outstandingInvoiceTotal = outstandingInvoices.reduce(
-      (total, invoice) => total + invoice.amount,
-      0,
-    );
+    const outstandingInvoiceTotal =
+      outstandingInvoices.reduce(
+        (total, invoice) =>
+          total + invoice.amount,
+        0,
+      );
 
     /*
      * TimeEntry.duration is stored as an integer.
      * The frontend displays hours, so convert minutes to hours.
      */
-    const minutesWorkedThisMonth = currentMonthTimeEntries.reduce(
-      (total, entry) => total + entry.duration,
-      0,
-    );
+    const minutesWorkedThisMonth =
+      currentMonthTimeEntries.reduce(
+        (total, entry) =>
+          total + entry.duration,
+        0,
+      );
 
     const hoursWorkedThisMonth =
       minutesWorkedThisMonth / 60;
@@ -244,32 +248,34 @@ router.get("/", async (req, res) => {
     );
 
     for (const payment of yearlyPayments) {
-      const month = payment.date.getUTCMonth();
+      const month =
+        payment.date.getUTCMonth();
 
-        monthlyRevenue[month] =
-        (monthlyRevenue[month] ?? 0) + payment.amount;
+      monthlyRevenue[month] =
+        (monthlyRevenue[month] ?? 0) +
+        payment.amount;
     }
 
     /*
-     * The existing dashboard chart expects percentage-style
-     * values from 0 to 100.
-     *
-     * Convert actual monthly revenue into relative bar heights.
+     * Convert actual monthly revenue into
+     * relative bar heights from 0 to 100.
      */
     const maximumMonthlyRevenue = Math.max(
       ...monthlyRevenue,
       0,
     );
 
-    const revenueChart = monthlyRevenue.map((amount) => {
-      if (maximumMonthlyRevenue === 0) {
-        return 0;
-      }
+    const revenueChart =
+      monthlyRevenue.map((amount) => {
+        if (maximumMonthlyRevenue === 0) {
+          return 0;
+        }
 
-      return Math.round(
-        (amount / maximumMonthlyRevenue) * 100,
-      );
-    });
+        return Math.round(
+          (amount / maximumMonthlyRevenue) *
+            100,
+        );
+      });
 
     return res.json({
       success: true,
@@ -278,7 +284,8 @@ router.get("/", async (req, res) => {
 
         stats: {
           revenueThisMonth,
-          outstandingInvoices: outstandingInvoiceTotal,
+          outstandingInvoices:
+            outstandingInvoiceTotal,
           outstandingInvoiceCount:
             outstandingInvoices.length,
           activeClients,
@@ -300,7 +307,10 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("GET /api/dashboard error:", error);
+    console.error(
+      "GET /api/dashboard error:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,

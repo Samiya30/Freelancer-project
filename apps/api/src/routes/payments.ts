@@ -1,6 +1,8 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
+
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -20,17 +22,20 @@ const paymentSchema = z.object({
 
 const updatePaymentSchema = paymentSchema.partial();
 
-async function getDemoUser() {
-  return prisma.user.upsert({
-    where: {
-      email: "demo@freelanceos.local",
-    },
-    update: {},
-    create: {
-      name: "Demo Freelancer",
-      email: "demo@freelanceos.local",
-    },
-  });
+router.use(requireAuth);
+
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
+
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
+  }
+
+  return userId;
 }
 
 async function validateRelations(
@@ -40,7 +45,7 @@ async function validateRelations(
     invoiceId?: number | null | undefined;
     projectId?: number | null | undefined;
   },
-){
+) {
   const client =
     data.clientId !== undefined && data.clientId !== null
       ? await prisma.client.findFirst({
@@ -138,13 +143,13 @@ async function validateRelations(
 /**
  * GET /api/payments
  */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const payments = await prisma.payment.findMany({
       where: {
-        userId: user.id,
+        userId,
       },
       include: {
         clientRecord: true,
@@ -175,7 +180,7 @@ router.get("/", async (_req, res) => {
  */
 router.get("/:id", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
     const id = Number(req.params.id);
 
     if (!Number.isInteger(id) || id <= 0) {
@@ -188,7 +193,7 @@ router.get("/:id", async (req, res) => {
     const payment = await prisma.payment.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
       include: {
         clientRecord: true,
@@ -224,9 +229,9 @@ router.get("/:id", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const data = paymentSchema.parse(req.body);
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
-    const relations = await validateRelations(user.id, data);
+    const relations = await validateRelations(userId, data);
 
     const existingPayment = await prisma.payment.findUnique({
       where: {
@@ -260,7 +265,7 @@ router.post("/", async (req, res) => {
           date: data.date,
           method: data.method,
           status: data.status,
-          userId: user.id,
+          userId,
           clientId: data.clientId ?? null,
           invoiceId: data.invoiceId ?? null,
           projectId: data.projectId ?? null,
@@ -272,10 +277,7 @@ router.post("/", async (req, res) => {
         },
       });
 
-      if (
-        data.status === "Completed" &&
-        relations.invoice
-      ) {
+      if (data.status === "Completed" && relations.invoice) {
         await tx.invoice.update({
           where: {
             id: relations.invoice.id,
@@ -286,7 +288,7 @@ router.post("/", async (req, res) => {
         });
       }
 
-            return tx.payment.findUnique({
+      return tx.payment.findUnique({
         where: {
           id: createdPayment.id,
         },
@@ -329,7 +331,7 @@ router.post("/", async (req, res) => {
  */
 router.patch("/:id", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
     const id = Number(req.params.id);
 
     if (!Number.isInteger(id) || id <= 0) {
@@ -344,7 +346,7 @@ router.patch("/:id", async (req, res) => {
     const existingPayment = await prisma.payment.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 
@@ -373,7 +375,7 @@ router.patch("/:id", async (req, res) => {
     };
 
     const relations = await validateRelations(
-      user.id,
+      userId,
       relationData,
     );
 
@@ -501,7 +503,7 @@ router.patch("/:id", async (req, res) => {
  */
 router.delete("/:id", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
     const id = Number(req.params.id);
 
     if (!Number.isInteger(id) || id <= 0) {
@@ -514,7 +516,7 @@ router.delete("/:id", async (req, res) => {
     const existingPayment = await prisma.payment.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 

@@ -1,19 +1,23 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-async function getDemoUser() {
-  return prisma.user.upsert({
-    where: {
-      email: "demo@freelanceos.local",
-    },
-    update: {},
-    create: {
-      name: "Demo Freelancer",
-      email: "demo@freelanceos.local",
-    },
-  });
+router.use(requireAuth);
+
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
+
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
+  }
+
+  return userId;
 }
 
 /**
@@ -26,7 +30,7 @@ async function getDemoUser() {
 router.get("/", async (req, res) => {
   try {
     const yearValue = Number(
-      req.query.year || new Date().getFullYear()
+      req.query.year || new Date().getFullYear(),
     );
 
     if (
@@ -40,14 +44,14 @@ router.get("/", async (req, res) => {
       });
     }
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const startDate = new Date(
-      `${yearValue}-01-01T00:00:00.000Z`
+      `${yearValue}-01-01T00:00:00.000Z`,
     );
 
     const endDate = new Date(
-      `${yearValue + 1}-01-01T00:00:00.000Z`
+      `${yearValue + 1}-01-01T00:00:00.000Z`,
     );
 
     const [
@@ -59,7 +63,7 @@ router.get("/", async (req, res) => {
     ] = await Promise.all([
       prisma.project.findMany({
         where: {
-          userId: user.id,
+          userId,
         },
         orderBy: {
           createdAt: "desc",
@@ -68,7 +72,7 @@ router.get("/", async (req, res) => {
 
       prisma.invoice.findMany({
         where: {
-          userId: user.id,
+          userId,
           issueDate: {
             gte: startDate,
             lt: endDate,
@@ -81,7 +85,7 @@ router.get("/", async (req, res) => {
 
       prisma.payment.findMany({
         where: {
-          userId: user.id,
+          userId,
           date: {
             gte: startDate,
             lt: endDate,
@@ -94,7 +98,7 @@ router.get("/", async (req, res) => {
 
       prisma.expense.findMany({
         where: {
-          userId: user.id,
+          userId,
           date: {
             gte: startDate,
             lt: endDate,
@@ -107,7 +111,7 @@ router.get("/", async (req, res) => {
 
       prisma.client.findMany({
         where: {
-          userId: user.id,
+          userId,
         },
         orderBy: {
           createdAt: "desc",
@@ -129,7 +133,7 @@ router.get("/", async (req, res) => {
   } catch (error) {
     console.error(
       "GET /api/reports error:",
-      error
+      error,
     );
 
     return res.status(500).json({

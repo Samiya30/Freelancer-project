@@ -1,6 +1,8 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
+
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -34,17 +36,20 @@ const settingsSchema = z.object({
   appearance: z.enum(["light", "dark", "system"]),
 });
 
-async function getDemoUser() {
-  return prisma.user.upsert({
-    where: {
-      email: "demo@freelanceos.local",
-    },
-    update: {},
-    create: {
-      name: "Demo Freelancer",
-      email: "demo@freelanceos.local",
-    },
-  });
+router.use(requireAuth);
+
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
+
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
+  }
+
+  return userId;
 }
 
 async function getOrCreateSettings(userId: number) {
@@ -55,8 +60,8 @@ async function getOrCreateSettings(userId: number) {
     update: {},
     create: {
       userId,
-      workspaceName: "Samiya's Workspace",
-      website: "https://example.com",
+      workspaceName: "FreelanceOS Workspace",
+      website: "",
       industry: "Technology",
       timezone: "Asia/Kolkata",
       currency: "INR (₹)",
@@ -67,10 +72,24 @@ async function getOrCreateSettings(userId: number) {
 /**
  * GET /api/settings
  */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user = await getDemoUser();
-    const settings = await getOrCreateSettings(user.id);
+    const userId = getUserId(req);
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    const settings = await getOrCreateSettings(userId);
 
     const firstName =
       user.firstName ||
@@ -146,7 +165,20 @@ router.patch("/", async (req, res) => {
       appearance,
     } = parsed.data;
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
 
     if (profile.email !== user.email) {
       const existingUser = await prisma.user.findUnique({
@@ -155,7 +187,7 @@ router.patch("/", async (req, res) => {
         },
       });
 
-      if (existingUser && existingUser.id !== user.id) {
+      if (existingUser && existingUser.id !== userId) {
         return res.status(409).json({
           success: false,
           message: "Email address is already in use.",
@@ -166,12 +198,12 @@ router.patch("/", async (req, res) => {
     const updated = await prisma.$transaction(async (tx) => {
       const updatedUser = await tx.user.update({
         where: {
-          id: user.id,
+          id: userId,
         },
         data: {
           firstName: profile.firstName,
           lastName: profile.lastName,
-          email: user.email,
+          email: profile.email,
           phone: profile.phone,
           role: profile.role,
           bio: profile.bio,
@@ -181,7 +213,7 @@ router.patch("/", async (req, res) => {
 
       const updatedSettings = await tx.settings.upsert({
         where: {
-          userId: user.id,
+          userId,
         },
         update: {
           workspaceName: workspace.name,
@@ -200,7 +232,7 @@ router.patch("/", async (req, res) => {
           appearance,
         },
         create: {
-          userId: user.id,
+          userId,
 
           workspaceName: workspace.name,
           website: workspace.website,

@@ -1,6 +1,7 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -38,17 +39,20 @@ const createInvoiceSchema = z.object({
 
 const updateInvoiceSchema = createInvoiceSchema.partial();
 
-async function getDemoUser() {
-  return prisma.user.upsert({
-    where: {
-      email: "demo@freelanceos.local",
-    },
-    update: {},
-    create: {
-      name: "Demo Freelancer",
-      email: "demo@freelanceos.local",
-    },
-  });
+router.use(requireAuth);
+
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
+
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
+  }
+
+  return userId;
 }
 
 async function validateRelations(
@@ -86,7 +90,10 @@ async function validateRelations(
   }
 
   if (client && project) {
-    if (project.clientId !== null && project.clientId !== client.id) {
+    if (
+      project.clientId !== null &&
+      project.clientId !== client.id
+    ) {
       throw new Error(
         "Selected client does not belong to the selected project",
       );
@@ -99,13 +106,13 @@ async function validateRelations(
 /**
  * GET /api/invoices
  */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const invoices = await prisma.invoice.findMany({
       where: {
-        userId: user.id,
+        userId,
       },
       include: {
         items: true,
@@ -143,12 +150,12 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const invoice = await prisma.invoice.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
       include: {
         items: true,
@@ -192,10 +199,10 @@ router.post("/", async (req, res) => {
     }
 
     const data = parsed.data;
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     await validateRelations(
-      user.id,
+      userId,
       data.clientId,
       data.projectId,
     );
@@ -226,7 +233,7 @@ router.post("/", async (req, res) => {
         description: data.description,
         tax: data.tax ?? 0,
         discount: data.discount ?? 0,
-        userId: user.id,
+        userId,
         clientId: data.clientId ?? null,
         projectId: data.projectId ?? null,
         ...(data.items && data.items.length > 0
@@ -289,12 +296,12 @@ router.patch("/:id", async (req, res) => {
     }
 
     const data = parsed.data;
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const existingInvoice = await prisma.invoice.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 
@@ -306,13 +313,13 @@ router.patch("/:id", async (req, res) => {
     }
 
     await validateRelations(
-      user.id,
+      userId,
       data.clientId,
       data.projectId,
     );
 
     if (
-      data.number &&
+      data.number !== undefined &&
       data.number !== existingInvoice.number
     ) {
       const duplicate = await prisma.invoice.findUnique({
@@ -430,12 +437,12 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const invoice = await prisma.invoice.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 

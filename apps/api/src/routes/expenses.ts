@@ -1,6 +1,8 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
+
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -26,17 +28,20 @@ const expenseSchema = z.object({
 
 const updateExpenseSchema = expenseSchema.partial();
 
-async function getDemoUser() {
-  return prisma.user.upsert({
-    where: {
-      email: "demo@freelanceos.local",
-    },
-    update: {},
-    create: {
-      name: "Demo Freelancer",
-      email: "demo@freelanceos.local",
-    },
-  });
+router.use(requireAuth);
+
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
+
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
+  }
+
+  return userId;
 }
 
 async function validateProject(
@@ -58,13 +63,13 @@ async function validateProject(
 /**
  * GET /api/expenses
  */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const expenses = await prisma.expense.findMany({
       where: {
-        userId: user.id,
+        userId,
       },
       include: {
         projectRecord: true,
@@ -93,10 +98,10 @@ router.get("/", async (_req, res) => {
  */
 router.get("/:id", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
     const id = Number(req.params.id);
 
-    if (!Number.isInteger(id)) {
+    if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid expense ID",
@@ -106,7 +111,7 @@ router.get("/:id", async (req, res) => {
     const expense = await prisma.expense.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
       include: {
         projectRecord: true,
@@ -140,10 +145,10 @@ router.get("/:id", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const data = expenseSchema.parse(req.body);
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const project = await validateProject(
-      user.id,
+      userId,
       data.projectId,
     );
 
@@ -160,7 +165,7 @@ router.post("/", async (req, res) => {
 
     const expense = await prisma.expense.create({
       data: {
-        userId: user.id,
+        userId,
         title: data.title,
         description: data.description ?? "",
         category: data.category,
@@ -213,10 +218,10 @@ router.post("/", async (req, res) => {
  */
 router.patch("/:id", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
     const id = Number(req.params.id);
 
-    if (!Number.isInteger(id)) {
+    if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid expense ID",
@@ -228,7 +233,7 @@ router.patch("/:id", async (req, res) => {
     const existingExpense = await prisma.expense.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 
@@ -240,7 +245,7 @@ router.patch("/:id", async (req, res) => {
     }
 
     const project = await validateProject(
-      user.id,
+      userId,
       data.projectId,
     );
 
@@ -329,10 +334,10 @@ router.patch("/:id", async (req, res) => {
  */
 router.delete("/:id", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
     const id = Number(req.params.id);
 
-    if (!Number.isInteger(id)) {
+    if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid expense ID",
@@ -342,7 +347,7 @@ router.delete("/:id", async (req, res) => {
     const existingExpense = await prisma.expense.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 

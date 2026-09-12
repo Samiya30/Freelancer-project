@@ -1,16 +1,18 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
 const uploadDirectory = path.resolve(
   process.cwd(),
-  "uploads"
+  "uploads",
 );
 
 fs.mkdirSync(uploadDirectory, {
@@ -127,19 +129,20 @@ const updateFileSchema = z.object({
     .optional(),
 });
 
-async function getDemoUser() {
-  return prisma.user.upsert({
-    where: {
-      email: "demo@freelanceos.local",
-    },
+router.use(requireAuth);
 
-    update: {},
+function getUserId(req: Request): number {
+  const userId = (req as Request & { userId?: unknown }).userId;
 
-    create: {
-      name: "Demo Freelancer",
-      email: "demo@freelanceos.local",
-    },
-  });
+  if (
+    typeof userId !== "number" ||
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    throw new Error("Authenticated user ID is missing");
+  }
+
+  return userId;
 }
 
 function detectFileType(filename: string) {
@@ -156,9 +159,7 @@ function detectFileType(filename: string) {
     return "DOC";
   }
 
-  if (
-    ["xls", "xlsx", "csv"].includes(extension)
-  ) {
+  if (["xls", "xlsx", "csv"].includes(extension)) {
     return "XLS";
   }
 
@@ -175,9 +176,7 @@ function detectFileType(filename: string) {
     return "IMAGE";
   }
 
-  if (
-    ["zip", "rar", "7z"].includes(extension)
-  ) {
+  if (["zip", "rar", "7z"].includes(extension)) {
     return "ZIP";
   }
 
@@ -202,7 +201,7 @@ function detectFileType(filename: string) {
 async function validateRelations(
   userId: number,
   clientId: number | null | undefined,
-  projectId: number | null | undefined
+  projectId: number | null | undefined,
 ) {
   let client = null;
   let project = null;
@@ -275,13 +274,13 @@ async function validateRelations(
 /**
  * GET /api/files
  */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const files = await prisma.file.findMany({
       where: {
-        userId: user.id,
+        userId,
       },
 
       orderBy: {
@@ -296,7 +295,7 @@ router.get("/", async (_req, res) => {
   } catch (error) {
     console.error(
       "GET /api/files error:",
-      error
+      error,
     );
 
     return res.status(500).json({
@@ -308,10 +307,6 @@ router.get("/", async (_req, res) => {
 
 /**
  * GET /api/files/:id/download
- *
- * IMPORTANT:
- * This route must appear before /:id
- * so "download" is handled correctly.
  */
 router.get(
   "/:id/download",
@@ -319,19 +314,19 @@ router.get(
     try {
       const id = Number(req.params.id);
 
-      if (!Number.isInteger(id)) {
+      if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
           success: false,
           message: "Invalid file ID.",
         });
       }
 
-      const user = await getDemoUser();
+      const userId = getUserId(req);
 
       const file = await prisma.file.findFirst({
         where: {
           id,
-          userId: user.id,
+          userId,
         },
       });
 
@@ -344,7 +339,7 @@ router.get(
 
       const filePath = path.join(
         uploadDirectory,
-        path.basename(file.storagePath)
+        path.basename(file.storagePath),
       );
 
       if (!fs.existsSync(filePath)) {
@@ -357,12 +352,12 @@ router.get(
 
       return res.download(
         filePath,
-        file.name
+        file.name,
       );
     } catch (error) {
       console.error(
         "GET /api/files/:id/download error:",
-        error
+        error,
       );
 
       return res.status(500).json({
@@ -370,7 +365,7 @@ router.get(
         message: "Failed to download file.",
       });
     }
-  }
+  },
 );
 
 /**
@@ -382,20 +377,20 @@ router.post(
     try {
       const id = Number(req.params.id);
 
-      if (!Number.isInteger(id)) {
+      if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
           success: false,
           message: "Invalid file ID.",
         });
       }
 
-      const user = await getDemoUser();
+      const userId = getUserId(req);
 
       const existingFile =
         await prisma.file.findFirst({
           where: {
             id,
-            userId: user.id,
+            userId,
           },
         });
 
@@ -409,8 +404,8 @@ router.post(
       const sourcePath = path.join(
         uploadDirectory,
         path.basename(
-          existingFile.storagePath
-        )
+          existingFile.storagePath,
+        ),
       );
 
       if (!fs.existsSync(sourcePath)) {
@@ -422,19 +417,20 @@ router.post(
       }
 
       const extension = path.extname(
-        existingFile.name
+        existingFile.name,
       );
 
-      const newStorageName = `${crypto.randomUUID()}${extension}`;
+      const newStorageName =
+        `${crypto.randomUUID()}${extension}`;
 
       const destinationPath = path.join(
         uploadDirectory,
-        newStorageName
+        newStorageName,
       );
 
       fs.copyFileSync(
         sourcePath,
-        destinationPath
+        destinationPath,
       );
 
       try {
@@ -451,7 +447,7 @@ router.post(
               project: existingFile.project,
               clientId: existingFile.clientId,
               projectId: existingFile.projectId,
-              userId: user.id,
+              userId,
             },
           });
 
@@ -473,7 +469,7 @@ router.post(
     } catch (error) {
       console.error(
         "POST /api/files/:id/duplicate error:",
-        error
+        error,
       );
 
       return res.status(500).json({
@@ -481,7 +477,7 @@ router.post(
         message: "Failed to duplicate file.",
       });
     }
-  }
+  },
 );
 
 /**
@@ -491,19 +487,19 @@ router.get("/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
 
-    if (!Number.isInteger(id)) {
+    if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid file ID.",
       });
     }
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const file = await prisma.file.findFirst({
       where: {
         id,
-        userId: user.id,
+        userId,
       },
     });
 
@@ -521,7 +517,7 @@ router.get("/:id", async (req, res) => {
   } catch (error) {
     console.error(
       "GET /api/files/:id error:",
-      error
+      error,
     );
 
     return res.status(500).json({
@@ -533,8 +529,6 @@ router.get("/:id", async (req, res) => {
 
 /**
  * POST /api/files/upload
- *
- * Upload binary file + create metadata.
  */
 router.post(
   "/upload",
@@ -549,7 +543,7 @@ router.post(
       }
 
       const parsed = createFileSchema.safeParse(
-        req.body
+        req.body,
       );
 
       if (!parsed.success) {
@@ -567,13 +561,13 @@ router.post(
       }
 
       const data = parsed.data;
-      const user = await getDemoUser();
+      const userId = getUserId(req);
 
       const relations =
         await validateRelations(
-          user.id,
+          userId,
           data.clientId,
-          data.projectId
+          data.projectId,
         );
 
       if (!relations.valid) {
@@ -591,12 +585,12 @@ router.post(
 
       const detectedType =
         detectFileType(
-          req.file.originalname
+          req.file.originalname,
         );
 
       const typeValidation =
         fileTypeSchema.safeParse(
-          detectedType
+          detectedType,
         );
 
       if (!typeValidation.success) {
@@ -646,7 +640,7 @@ router.post(
                 }
               : {}),
 
-            userId: user.id,
+            userId,
           },
         });
 
@@ -667,7 +661,7 @@ router.post(
 
       console.error(
         "POST /api/files/upload error:",
-        error
+        error,
       );
 
       return res.status(500).json({
@@ -675,7 +669,7 @@ router.post(
         message: "Failed to upload file.",
       });
     }
-  }
+  },
 );
 
 /**
@@ -685,7 +679,7 @@ router.patch("/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
 
-    if (!Number.isInteger(id)) {
+    if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid file ID.",
@@ -704,13 +698,13 @@ router.patch("/:id", async (req, res) => {
     }
 
     const data = parsed.data;
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const existingFile =
       await prisma.file.findFirst({
         where: {
           id,
-          userId: user.id,
+          userId,
         },
       });
 
@@ -721,11 +715,21 @@ router.patch("/:id", async (req, res) => {
       });
     }
 
+    const effectiveClientId =
+      data.clientId !== undefined
+        ? data.clientId
+        : existingFile.clientId;
+
+    const effectiveProjectId =
+      data.projectId !== undefined
+        ? data.projectId
+        : existingFile.projectId;
+
     const relations =
       await validateRelations(
-        user.id,
-        data.clientId,
-        data.projectId
+        userId,
+        effectiveClientId,
+        effectiveProjectId,
       );
 
     if (!relations.valid) {
@@ -795,7 +799,7 @@ router.patch("/:id", async (req, res) => {
   } catch (error) {
     console.error(
       "PATCH /api/files/:id error:",
-      error
+      error,
     );
 
     return res.status(500).json({
@@ -812,20 +816,20 @@ router.delete("/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
 
-    if (!Number.isInteger(id)) {
+    if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid file ID.",
       });
     }
 
-    const user = await getDemoUser();
+    const userId = getUserId(req);
 
     const existingFile =
       await prisma.file.findFirst({
         where: {
           id,
-          userId: user.id,
+          userId,
         },
       });
 
@@ -839,8 +843,8 @@ router.delete("/:id", async (req, res) => {
     const filePath = path.join(
       uploadDirectory,
       path.basename(
-        existingFile.storagePath
-      )
+        existingFile.storagePath,
+      ),
     );
 
     await prisma.file.delete({
@@ -861,7 +865,7 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     console.error(
       "DELETE /api/files/:id error:",
-      error
+      error,
     );
 
     return res.status(500).json({
