@@ -114,15 +114,30 @@ router.post("/register", async (req, res, next) => {
     const passwordHash = await hashPassword(password);
 
     const user = await prisma.user.create({
-      data: {
-        name: normalizedName,
-        email: normalizedEmail,
-        password: passwordHash,
-        firstName: typeof firstName === "string" ? firstName.trim() : "",
-        lastName: typeof lastName === "string" ? lastName.trim() : "",
-        phone: typeof phone === "string" ? phone.trim() : "",
+  data: {
+    name: normalizedName,
+    email: normalizedEmail,
+    password: passwordHash,
+    firstName:
+      typeof firstName === "string"
+        ? firstName.trim()
+        : normalizedName.split(" ")[0] || "",
+    lastName:
+      typeof lastName === "string"
+        ? lastName.trim()
+        : normalizedName.split(" ").slice(1).join(" "),
+    phone: typeof phone === "string" ? phone.trim() : "",
+    settings: {
+      create: {
+        workspaceName: `${normalizedName}'s Workspace`,
+        website: "",
+        industry: "Technology",
+        timezone: "Asia/Kolkata",
+        currency: "INR",
       },
-    });
+    },
+  },
+});
 
     const session = await createSession(user.id);
 

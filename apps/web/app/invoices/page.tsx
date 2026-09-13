@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
-import { InvoiceStatus } from "@/lib/store/FreelanceStore";
 import {
   ApiInvoice,
+  InvoiceStatus,
   createInvoice,
   deleteInvoice,
   getInvoices,

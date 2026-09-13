@@ -3,7 +3,6 @@ import "./globals.css";
 
 import { AuthProvider } from "@/lib/auth/AuthContext";
 import { ToastProvider } from "@/components/ui/ToastProvider";
-import { FreelanceStoreProvider } from "@/lib/store/FreelanceStore";
 
 export const metadata: Metadata = {
   title: "FreelanceOS",
@@ -19,9 +18,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AuthProvider>
-          <FreelanceStoreProvider>
-            <ToastProvider>{children}</ToastProvider>
-          </FreelanceStoreProvider>
+          <ToastProvider>{children}</ToastProvider>
         </AuthProvider>
       </body>
     </html>

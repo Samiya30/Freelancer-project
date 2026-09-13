@@ -7,6 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import type { ReactNode } from "react";
 
 import { api } from "@/lib/api/http";
 
@@ -23,6 +24,10 @@ export interface AuthUser {
   updatedAt: string;
 }
 
+interface AuthResponseData {
+  user: AuthUser;
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
@@ -31,31 +36,25 @@ interface AuthContextValue {
   logout: () => Promise<void>;
 }
 
-const AuthContext =
-  createContext<AuthContextValue | undefined>(
-    undefined,
-  );
+const AuthContext = createContext<AuthContextValue | undefined>(
+  undefined,
+);
 
 export function AuthProvider({
   children,
 }: {
-  children: React.ReactNode;
-}) {
-  const [user, setUser] =
-    useState<AuthUser | null>(null);
-
-  const [loading, setLoading] =
-    useState(true);
+  children: ReactNode;
+}): ReactNode {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
     try {
       const response =
-        await api.get<AuthUser>(
-          "/api/auth/me",
-        );
+        await api.get<AuthResponseData>("/api/auth/me");
 
-      if (response.success && response.data) {
-        setUser(response.data);
+      if (response.success && response.data?.user) {
+        setUser(response.data.user);
       } else {
         setUser(null);
       }
@@ -70,19 +69,14 @@ export function AuthProvider({
     async function loadSession() {
       try {
         const response =
-          await api.get<AuthUser>(
-            "/api/auth/me",
-          );
+          await api.get<AuthResponseData>("/api/auth/me");
 
         if (cancelled) {
           return;
         }
 
-        if (
-          response.success &&
-          response.data
-        ) {
-          setUser(response.data);
+        if (response.success && response.data?.user) {
+          setUser(response.data.user);
         } else {
           setUser(null);
         }
@@ -106,10 +100,7 @@ export function AuthProvider({
 
   const logout = useCallback(async () => {
     try {
-      await api.post(
-        "/api/auth/logout",
-        {},
-      );
+      await api.post("/api/auth/logout", {});
     } finally {
       setUser(null);
     }
@@ -120,8 +111,7 @@ export function AuthProvider({
       value={{
         user,
         loading,
-        isAuthenticated:
-          user !== null,
+        isAuthenticated: user !== null,
         refreshUser,
         logout,
       }}
@@ -131,14 +121,11 @@ export function AuthProvider({
   );
 }
 
-export function useAuth() {
-  const context =
-    useContext(AuthContext);
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
 
   if (!context) {
-    throw new Error(
-      "useAuth must be used inside AuthProvider",
-    );
+    throw new Error("useAuth must be used inside AuthProvider");
   }
 
   return context;

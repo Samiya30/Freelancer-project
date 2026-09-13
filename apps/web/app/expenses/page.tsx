@@ -2,15 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
-import { ExpenseCategory, ExpenseStatus } from "@/lib/store/FreelanceStore";
-import { useToast } from "@/components/ui/ToastProvider";
 import {
+  ExpenseCategory,
+  ExpenseStatus,
   getExpenses,
   createExpense,
   updateExpense,
   deleteExpense,
   ApiExpense,
-} from "@/lib/api/expenses";
+} from "@/lib/api/expenses";import { useToast } from "@/components/ui/ToastProvider";
 import { getProjects, ApiProject } from "@/lib/api/projects";
 import {
   Plus,
@@ -1398,6 +1398,7 @@ export default function ExpensesPage() {
           </div>
         )}
       </div>
+
     </AppShell>
   );
 }

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
-import { PaymentMethod, PaymentStatus } from "@/lib/store/FreelanceStore";
 import { useToast } from "@/components/ui/ToastProvider";
 import {
   getPayments,
@@ -42,6 +41,17 @@ const statuses: PaymentStatus[] = [
   "Pending",
   "Failed",
 ];
+
+type PaymentMethod =
+  | "UPI"
+  | "Bank Transfer"
+  | "Card"
+  | "Cash";
+
+type PaymentStatus =
+  | "Completed"
+  | "Pending"
+  | "Failed";
 
 const methods: PaymentMethod[] = [
   "UPI",

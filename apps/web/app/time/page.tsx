@@ -2,11 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
-import {
-  TimeEntry,
-  useFreelanceStore,
-} from "@/lib/store/FreelanceStore";
 import { useToast } from "@/components/ui/ToastProvider";
+
+import type { ApiTimeEntry } from "@/lib/api/time";
+import {
+  createTimeEntry,
+  deleteTimeEntry,
+  getTimeEntries,
+} from "@/lib/api/time";
+
+import type { ApiProject } from "@/lib/api/projects";
+import { getProjects } from "@/lib/api/projects";
+
+import type { ApiTask } from "@/lib/api/tasks";
+import { getTasks } from "@/lib/api/tasks";
+
 import {
   Plus,
   Search,
@@ -51,6 +61,10 @@ function formatTimer(seconds: number) {
   ].join(":");
 }
 
+function toDateInputValue(value: string) {
+  return value.slice(0, 10);
+}
+
 function getProjectGradient(project: string) {
   const gradients = [
     "from-violet-500 to-fuchsia-500",
@@ -67,23 +81,11 @@ function getProjectGradient(project: string) {
   return gradients[index];
 }
 
-function getInitials(name: string) {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 export default function TimePage() {
-  const {
-    timeEntries,
-    projects,
-    tasks,
-    addTimeEntry,
-    deleteTimeEntry,
-  } = useFreelanceStore();
+  const [timeEntries, setTimeEntries] = useState<ApiTimeEntry[]>([]);
+  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const { showToast } = useToast();
 
@@ -110,7 +112,53 @@ export default function TimePage() {
   });
 
   useEffect(() => {
-    if (!timerRunning) return;
+    let cancelled = false;
+
+    async function loadTimeData() {
+      try {
+        setLoading(true);
+
+        const [timeResponse, projectsResponse, tasksResponse] =
+          await Promise.all([
+            getTimeEntries(),
+            getProjects(),
+            getTasks(),
+          ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setTimeEntries(timeResponse.data ?? []);
+        setProjects(projectsResponse.data ?? []);
+        setTasks(tasksResponse.data ?? []);
+      } catch (error) {
+        if (!cancelled) {
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "Failed to load time tracking data.",
+            "error"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadTimeData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    if (!timerRunning) {
+      return;
+    }
 
     const interval = setInterval(() => {
       setTimerSeconds((seconds) => seconds + 1);
@@ -134,7 +182,8 @@ export default function TimePage() {
         entry.projectName === projectFilter;
 
       const matchesDate =
-        !dateFilter || entry.date === dateFilter;
+        !dateFilter ||
+        toDateInputValue(entry.date) === dateFilter;
 
       return matchesSearch && matchesProject && matchesDate;
     });
@@ -166,6 +215,12 @@ export default function TimePage() {
     (task) => task.projectId === Number(newEntry.projectId)
   );
 
+  const today = new Date().toISOString().split("T")[0];
+
+  const todayMinutes = timeEntries
+    .filter((entry) => toDateInputValue(entry.date) === today)
+    .reduce((sum, entry) => sum + entry.duration, 0);
+
   const handleStartTimer = () => {
     if (timerRunning) {
       setTimerRunning(false);
@@ -173,22 +228,34 @@ export default function TimePage() {
       return;
     }
 
+    if (projects.length === 0) {
+      showToast(
+        "Create a project before starting a timer.",
+        "error"
+      );
+      return;
+    }
+
     setTimerRunning(true);
     showToast("Timer started.", "success");
   };
 
-  const handleStopTimer = () => {
+  const handleStopTimer = async () => {
     if (timerSeconds === 0) {
       setTimerRunning(false);
       return;
     }
 
     const selectedProject =
-      projects.find((project) => project.id === Number(newEntry.projectId)) ||
-      projects[0];
+      projects.find(
+        (project) => project.id === Number(newEntry.projectId)
+      ) || projects[0];
 
     if (!selectedProject) {
-      showToast("Create a project before starting a timer.", "error");
+      showToast(
+        "Create a project before starting a timer.",
+        "error"
+      );
       setTimerRunning(false);
       return;
     }
@@ -198,44 +265,58 @@ export default function TimePage() {
       Math.round(timerSeconds / 60)
     );
 
-    const entry: TimeEntry = {
-      id: Date.now(),
-      description:
-        newEntry.description.trim() || "Tracked work session",
-      projectId: selectedProject.id,
-      projectName: selectedProject.name,
-      taskId: newEntry.taskId
-        ? Number(newEntry.taskId)
-        : undefined,
-      taskName: newEntry.taskId
-        ? tasks.find(
-            (task) => task.id === Number(newEntry.taskId)
-          )?.title
-        : undefined,
-      date: new Date().toISOString().split("T")[0],
-      duration,
-      billable: true,
-      hourlyRate: Number(newEntry.hourlyRate) || 1500,
-    };
+    const taskId = newEntry.taskId
+      ? Number(newEntry.taskId)
+      : undefined;
 
-    addTimeEntry(entry);
+    try {
+      const response = await createTimeEntry({
+        description:
+          newEntry.description.trim() ||
+          "Tracked work session",
+        projectId: selectedProject.id,
+        taskId,
+        date: today,
+        duration,
+        billable: true,
+        hourlyRate:
+          Number(newEntry.hourlyRate) || 1500,
+      });
 
-    setTimerSeconds(0);
-    setTimerRunning(false);
+      if (response.data) {
+        setTimeEntries((current) => [
+          response.data!,
+          ...current,
+        ]);
+      }
 
-    showToast(
-      `${formatDuration(duration)} saved to ${selectedProject.name}.`,
-      "success"
-    );
+      setTimerSeconds(0);
+      setTimerRunning(false);
+
+      showToast(
+        `${formatDuration(duration)} saved to ${selectedProject.name}.`,
+        "success"
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to save timer session.",
+        "error"
+      );
+    }
   };
 
-  const handleAddEntry = () => {
+  const handleAddEntry = async () => {
     if (
       !newEntry.description.trim() ||
       !newEntry.projectId ||
       !newEntry.date
     ) {
-      showToast("Please fill in the required fields.", "error");
+      showToast(
+        "Please fill in the required fields.",
+        "error"
+      );
       return;
     }
 
@@ -248,12 +329,23 @@ export default function TimePage() {
       return;
     }
 
+    if (minutes < 0 || minutes > 59) {
+      showToast(
+        "Minutes must be between 0 and 59.",
+        "error"
+      );
+      return;
+    }
+
     const selectedProject = projects.find(
       (project) => project.id === Number(newEntry.projectId)
     );
 
     if (!selectedProject) {
-      showToast("Please select a valid project.", "error");
+      showToast(
+        "Please select a valid project.",
+        "error"
+      );
       return;
     }
 
@@ -263,64 +355,138 @@ export default function TimePage() {
         )
       : undefined;
 
-    const entry: TimeEntry = {
-      id: Date.now(),
-      description: newEntry.description.trim(),
-      projectId: selectedProject.id,
-      projectName: selectedProject.name,
-      taskId: selectedTask?.id,
-      taskName: selectedTask?.title,
-      date: newEntry.date,
-      duration,
-      billable: newEntry.billable,
-      hourlyRate: Number(newEntry.hourlyRate) || 1500,
-    };
+    try {
+      const response = await createTimeEntry({
+        description: newEntry.description.trim(),
+        projectId: selectedProject.id,
+        taskId: selectedTask?.id,
+        date: newEntry.date,
+        duration,
+        billable: newEntry.billable,
+        hourlyRate:
+          Number(newEntry.hourlyRate) || 1500,
+      });
 
-    addTimeEntry(entry);
+      if (response.data) {
+        setTimeEntries((current) => [
+          response.data!,
+          ...current,
+        ]);
+      }
 
-    setNewEntry({
-      description: "",
-      projectId: "",
-      taskId: "",
-      date: new Date().toISOString().split("T")[0],
-      hours: "",
-      minutes: "",
-      billable: true,
-      hourlyRate: "1500",
-    });
+      setNewEntry({
+        description: "",
+        projectId: "",
+        taskId: "",
+        date: new Date().toISOString().split("T")[0],
+        hours: "",
+        minutes: "",
+        billable: true,
+        hourlyRate: "1500",
+      });
 
-    setAddOpen(false);
+      setAddOpen(false);
 
-    showToast("Time entry added successfully.", "success");
+      showToast(
+        "Time entry added successfully.",
+        "success"
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to add time entry.",
+        "error"
+      );
+    }
   };
 
-  const handleDuplicate = (entry: TimeEntry) => {
-    const duplicate: TimeEntry = {
-      ...entry,
-      id: Date.now(),
-      description: `${entry.description} - Copy`,
-    };
+  const handleDuplicate = async (
+    entry: ApiTimeEntry
+  ) => {
+    try {
+      const response = await createTimeEntry({
+        description: `${entry.description} - Copy`,
+        projectId: entry.projectId,
+        taskId: entry.taskId ?? undefined,
+        date: toDateInputValue(entry.date),
+        duration: entry.duration,
+        billable: entry.billable,
+        hourlyRate: entry.hourlyRate,
+      });
 
-    addTimeEntry(duplicate);
-    setMenuId(null);
+      if (response.data) {
+        setTimeEntries((current) => [
+          response.data!,
+          ...current,
+        ]);
+      }
 
-    showToast("Time entry duplicated.", "success");
+      setMenuId(null);
+
+      showToast(
+        "Time entry duplicated.",
+        "success"
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to duplicate time entry.",
+        "error"
+      );
+    }
   };
 
-  const handleDelete = () => {
-    if (deleteId === null) return;
+  const handleDelete = async () => {
+    if (deleteId === null) {
+      return;
+    }
 
-    deleteTimeEntry(deleteId);
-    setDeleteId(null);
-    setMenuId(null);
+    try {
+      await deleteTimeEntry(deleteId);
 
-    showToast("Time entry deleted.", "success");
+      setTimeEntries((current) =>
+        current.filter((entry) => entry.id !== deleteId)
+      );
+
+      setDeleteId(null);
+      setMenuId(null);
+
+      showToast(
+        "Time entry deleted.",
+        "success"
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to delete time entry.",
+        "error"
+      );
+    }
   };
 
   const resetTimer = () => {
     setTimerRunning(false);
     setTimerSeconds(0);
   };
+
+  if (loading) {
+    return (
+      <AppShell>
+        <div className="flex min-h-full items-center justify-center bg-gradient-to-br from-slate-50 via-white to-cyan-50/30 p-8">
+          <div className="text-center">
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
+
+            <p className="mt-4 text-sm font-semibold text-slate-600">
+              Loading time tracking...
+            </p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
@@ -391,7 +557,11 @@ export default function TimePage() {
                   <button
                     onClick={handleStartTimer}
                     className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-slate-900 shadow-lg transition hover:scale-105"
-                    title={timerRunning ? "Pause timer" : "Start timer"}
+                    title={
+                      timerRunning
+                        ? "Pause timer"
+                        : "Start timer"
+                    }
                   >
                     {timerRunning ? (
                       <Pause className="h-5 w-5" />
@@ -426,20 +596,7 @@ export default function TimePage() {
                 </p>
 
                 <p className="mt-1 text-xl font-bold">
-                  {formatDuration(
-                    timeEntries
-                      .filter(
-                        (entry) =>
-                          entry.date ===
-                          new Date()
-                            .toISOString()
-                            .split("T")[0]
-                      )
-                      .reduce(
-                        (sum, entry) => sum + entry.duration,
-                        0
-                      )
-                  )}
+                  {formatDuration(todayMinutes)}
                 </p>
               </div>
 
@@ -587,7 +744,10 @@ export default function TimePage() {
                 <option value="All">All Projects</option>
 
                 {projects.map((project) => (
-                  <option key={project.id} value={project.name}>
+                  <option
+                    key={project.id}
+                    value={project.name}
+                  >
                     {project.name}
                   </option>
                 ))}
@@ -596,7 +756,9 @@ export default function TimePage() {
               <input
                 type="date"
                 value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
+                onChange={(e) =>
+                  setDateFilter(e.target.value)
+                }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
               />
             </div>
@@ -652,7 +814,9 @@ export default function TimePage() {
 
                         {entry.taskName && (
                           <>
-                            <span className="text-slate-300">•</span>
+                            <span className="text-slate-300">
+                              •
+                            </span>
 
                             <span className="truncate text-xs text-slate-400">
                               {entry.taskName}
@@ -681,7 +845,7 @@ export default function TimePage() {
                         <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
 
                         <span className="text-xs font-semibold text-slate-700">
-                          {entry.date}
+                          {toDateInputValue(entry.date)}
                         </span>
                       </div>
                     </div>
@@ -721,6 +885,7 @@ export default function TimePage() {
                           )
                         }
                         className="rounded-xl p-2.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                        aria-label="Time entry actions"
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
@@ -825,12 +990,38 @@ export default function TimePage() {
                             )
                           }
                           className="rounded-lg p-1.5 text-slate-400"
+                          aria-label="Time entry actions"
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
                   </div>
+
+                  {menuId === entry.id && (
+                    <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                      <button
+                        onClick={() =>
+                          handleDuplicate(entry)
+                        }
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Duplicate
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setDeleteId(entry.id);
+                          setMenuId(null);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  )}
 
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <div className="rounded-xl bg-cyan-50 p-3">
@@ -862,7 +1053,7 @@ export default function TimePage() {
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-xs text-slate-400">
                       <CalendarDays className="h-3.5 w-3.5" />
-                      {entry.date}
+                      {toDateInputValue(entry.date)}
                     </div>
 
                     <span
@@ -946,6 +1137,7 @@ export default function TimePage() {
                   <button
                     onClick={() => setAddOpen(false)}
                     className="rounded-xl bg-white/10 p-2 hover:bg-white/20"
+                    aria-label="Close"
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -988,10 +1180,15 @@ export default function TimePage() {
                       }
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                     >
-                      <option value="">Select project</option>
+                      <option value="">
+                        Select project
+                      </option>
 
                       {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
+                        <option
+                          key={project.id}
+                          value={project.id}
+                        >
                           {project.name}
                         </option>
                       ))}
@@ -1021,7 +1218,10 @@ export default function TimePage() {
                       </option>
 
                       {selectedProjectTasks.map((task) => (
-                        <option key={task.id} value={task.id}>
+                        <option
+                          key={task.id}
+                          value={task.id}
+                        >
                           {task.title}
                         </option>
                       ))}
