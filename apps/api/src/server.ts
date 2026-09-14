@@ -19,6 +19,7 @@ import settingsRouter from "./routes/settings.js";
 import reportsRouter from "./routes/reports.js";
 import dashboardRouter from "./routes/dashboard.js";
 import authRouter from "./routes/auth.js";
+import membersRouter from "./routes/members.js";
 
 const app = express();
 
@@ -77,6 +78,7 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/members", membersRouter);
 
 /*
  * 404 handler

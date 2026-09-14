@@ -1,0 +1,3 @@
+-- Reconcile schema changes that already exist in the database.
+-- This migration is intentionally empty because these changes
+-- are already present in the database and must not be executed again.

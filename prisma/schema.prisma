@@ -6,6 +6,10 @@ datasource db {
   provider = "postgresql"
 }
 
+// ============================================================
+// EXISTING ENUMS
+// ============================================================
+
 enum LeadStatus {
   New
   Contacted
@@ -97,6 +101,42 @@ enum ExpenseStatus {
   Pending
 }
 
+// ============================================================
+// RBAC ENUMS
+// ============================================================
+
+enum WorkspaceMemberStatus {
+  Active
+  Suspended
+  Invited
+}
+
+enum PermissionEffect {
+  Allow
+  Deny
+}
+
+enum AuditAction {
+  Created
+  Updated
+  Deleted
+  Granted
+  Revoked
+  Promoted
+  Demoted
+  Invited
+  Removed
+  Suspended
+  Restored
+  RoleCreated
+  RoleUpdated
+  RoleDeleted
+}
+
+// ============================================================
+// USER
+// ============================================================
+
 model User {
   id        Int      @id @default(autoincrement())
   name      String
@@ -125,7 +165,191 @@ model User {
   files         File[]
   settings      Settings?
   sessions      Session[]
+
+  // RBAC / Workspace
+  ownedWorkspaces     Workspace[]        @relation("WorkspaceOwner")
+  memberships         WorkspaceMember[]
+  createdRoles        Role[]             @relation("RoleCreator")
+  permissionOverrides MemberPermission[]
+  auditLogs           AuditLog[]         @relation("AuditActor")
 }
+
+// ============================================================
+// WORKSPACE
+// ============================================================
+
+model Workspace {
+  id          Int      @id @default(autoincrement())
+  name        String
+  slug        String   @unique
+  description String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId Int
+  owner   User @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+
+  members     WorkspaceMember[]
+  roles       Role[]
+  permissions Permission[]
+  auditLogs   AuditLog[]
+
+  @@index([ownerId])
+}
+
+// ============================================================
+// WORKSPACE MEMBER
+// ============================================================
+
+model WorkspaceMember {
+  id          Int                   @id @default(autoincrement())
+  workspaceId Int
+  userId      Int
+  roleId      Int
+  status      WorkspaceMemberStatus @default(Active)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  permissionOverrides MemberPermission[]
+  auditLogs           AuditLog[]
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([roleId])
+  @@index([workspaceId, status])
+}
+
+// ============================================================
+// ROLE
+// ============================================================
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String   @default("")
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspaceId Int
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdById Int?
+  createdBy   User? @relation("RoleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members         WorkspaceMember[]
+  rolePermissions RolePermission[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([createdById])
+}
+
+// ============================================================
+// PERMISSION
+// ============================================================
+
+model Permission {
+  id          Int      @id @default(autoincrement())
+  key         String
+  name        String
+  description String   @default("")
+  category    String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspaceId Int
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  rolePermissions RolePermission[]
+  memberOverrides MemberPermission[]
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
+  @@index([category])
+}
+
+// ============================================================
+// ROLE ↔ PERMISSION
+// ============================================================
+
+model RolePermission {
+  id           Int              @id @default(autoincrement())
+  roleId       Int
+  permissionId Int
+  effect       PermissionEffect @default(Allow)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+// ============================================================
+// MEMBER-SPECIFIC PERMISSION OVERRIDES
+// ============================================================
+
+model MemberPermission {
+  id           Int              @id @default(autoincrement())
+  memberId     Int
+  permissionId Int
+  effect       PermissionEffect
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  member     WorkspaceMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  permission Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedBy  User            @relation(fields: [grantedById], references: [id], onDelete: Restrict)
+
+  grantedById Int
+
+  @@unique([memberId, permissionId])
+  @@index([memberId])
+  @@index([permissionId])
+  @@index([grantedById])
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id          Int         @id @default(autoincrement())
+  action      AuditAction
+  entityType  String
+  entityId    String?
+  description String      @default("")
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  workspaceId Int
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  actorId Int?
+  actor   User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  memberId Int?
+  member   WorkspaceMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+  @@index([actorId])
+  @@index([memberId])
+  @@index([entityType, entityId])
+}
+
+// ============================================================
+// SESSION
+// ============================================================
 
 model Session {
   id        String   @id
@@ -139,6 +363,10 @@ model Session {
   @@index([userId])
   @@index([expiresAt])
 }
+
+// ============================================================
+// CLIENT
+// ============================================================
 
 model Client {
   id           Int          @id @default(autoincrement())
@@ -163,6 +391,10 @@ model Client {
   payments       Payment[]
 }
 
+// ============================================================
+// LEAD
+// ============================================================
+
 model Lead {
   id        Int        @id @default(autoincrement())
   name      String
@@ -181,6 +413,10 @@ model Lead {
   clientId Int?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 }
+
+// ============================================================
+// PROPOSAL
+// ============================================================
 
 model Proposal {
   id          Int            @id @default(autoincrement())
@@ -204,6 +440,10 @@ model Proposal {
   clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 }
 
+// ============================================================
+// CONTRACT
+// ============================================================
+
 model Contract {
   id          Int            @id @default(autoincrement())
   number      String
@@ -225,6 +465,10 @@ model Contract {
   clientId     Int?
   clientRecord Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 }
+
+// ============================================================
+// PROJECT
+// ============================================================
 
 model Project {
   id          Int           @id @default(autoincrement())
@@ -253,6 +497,10 @@ model Project {
   expenses    Expense[]
 }
 
+// ============================================================
+// TASK
+// ============================================================
+
 model Task {
   id          Int          @id @default(autoincrement())
   title       String
@@ -270,6 +518,10 @@ model Task {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
+
+// ============================================================
+// TIME ENTRY
+// ============================================================
 
 model TimeEntry {
   id          Int      @id @default(autoincrement())
@@ -289,6 +541,10 @@ model TimeEntry {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
+
+// ============================================================
+// INVOICE
+// ============================================================
 
 model Invoice {
   id          Int           @id @default(autoincrement())
@@ -319,6 +575,10 @@ model Invoice {
   payments Payment[]
 }
 
+// ============================================================
+// INVOICE ITEM
+// ============================================================
+
 model InvoiceItem {
   id          Int    @id @default(autoincrement())
   description String
@@ -328,6 +588,10 @@ model InvoiceItem {
   invoiceId Int
   invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 }
+
+// ============================================================
+// PAYMENT
+// ============================================================
 
 model Payment {
   id            Int           @id @default(autoincrement())
@@ -354,6 +618,10 @@ model Payment {
   projectRecord Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 }
 
+// ============================================================
+// EXPENSE
+// ============================================================
+
 model Expense {
   id          Int             @id @default(autoincrement())
   title       String
@@ -373,6 +641,10 @@ model Expense {
   projectId     Int?
   projectRecord Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 }
+
+// ============================================================
+// CONVERSATION
+// ============================================================
 
 model Conversation {
   id          Int      @id @default(autoincrement())
@@ -395,6 +667,10 @@ model Conversation {
   updatedAt DateTime @updatedAt
 }
 
+// ============================================================
+// MESSAGE
+// ============================================================
+
 model Message {
   id     Int      @id @default(autoincrement())
   text   String
@@ -411,6 +687,10 @@ model Message {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ============================================================
+// FILE
+// ============================================================
 
 model File {
   id          Int      @id @default(autoincrement())
@@ -435,6 +715,10 @@ model File {
   @@index([projectId])
   @@index([folder])
 }
+
+// ============================================================
+// SETTINGS
+// ============================================================
 
 model Settings {
   id Int @id @default(autoincrement())
