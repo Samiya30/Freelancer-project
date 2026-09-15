@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -274,42 +275,46 @@ async function validateRelations(
 /**
  * GET /api/files
  */
-router.get("/", async (req, res) => {
-  try {
-    const userId = getUserId(req);
+router.get(
+  "/",
+  requirePermission("files.view"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
 
-    const files = await prisma.file.findMany({
-      where: {
-        userId,
-      },
+      const files = await prisma.file.findMany({
+        where: {
+          userId,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
 
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+      return res.json({
+        success: true,
+        data: files,
+      });
+    } catch (error) {
+      console.error(
+        "GET /api/files error:",
+        error,
+      );
 
-    return res.json({
-      success: true,
-      data: files,
-    });
-  } catch (error) {
-    console.error(
-      "GET /api/files error:",
-      error,
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch files.",
-    });
-  }
-});
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch files.",
+      });
+    }
+  },
+);
 
 /**
  * GET /api/files/:id/download
  */
 router.get(
   "/:id/download",
+  requirePermission("files.view"),
   async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -373,6 +378,7 @@ router.get(
  */
 router.post(
   "/:id/duplicate",
+  requirePermission("files.create"),
   async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -398,6 +404,26 @@ router.post(
         return res.status(404).json({
           success: false,
           message: "File not found.",
+        });
+      }
+
+      /*
+       * The source file has already been restricted to the
+       * authenticated user's files. Its linked records are
+       * therefore safe to reuse, but we still validate them
+       * before creating the duplicate.
+       */
+      const relations =
+        await validateRelations(
+          userId,
+          existingFile.clientId,
+          existingFile.projectId,
+        );
+
+      if (!relations.valid) {
+        return res.status(400).json({
+          success: false,
+          message: relations.message,
         });
       }
 
@@ -483,55 +509,60 @@ router.post(
 /**
  * GET /api/files/:id
  */
-router.get("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.get(
+  "/:id",
+  requirePermission("files.view"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file ID.",
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!file) {
+        return res.status(404).json({
+          success: false,
+          message: "File not found.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: file,
+      });
+    } catch (error) {
+      console.error(
+        "GET /api/files/:id error:",
+        error,
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid file ID.",
+        message: "Failed to fetch file.",
       });
     }
-
-    const userId = getUserId(req);
-
-    const file = await prisma.file.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!file) {
-      return res.status(404).json({
-        success: false,
-        message: "File not found.",
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: file,
-    });
-  } catch (error) {
-    console.error(
-      "GET /api/files/:id error:",
-      error,
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch file.",
-    });
-  }
-});
+  },
+);
 
 /**
  * POST /api/files/upload
  */
 router.post(
   "/upload",
+  requirePermission("files.create"),
   upload.single("file"),
   async (req, res) => {
     try {
@@ -675,204 +706,218 @@ router.post(
 /**
  * PATCH /api/files/:id
  */
-router.patch("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.patch(
+  "/:id",
+  requirePermission("files.update"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid file ID.",
-      });
-    }
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file ID.",
+        });
+      }
 
-    const parsed =
-      updateFileSchema.safeParse(req.body);
+      const parsed =
+        updateFileSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid file data.",
-        errors: parsed.error.flatten(),
-      });
-    }
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file data.",
+          errors: parsed.error.flatten(),
+        });
+      }
 
-    const data = parsed.data;
-    const userId = getUserId(req);
+      const data = parsed.data;
+      const userId = getUserId(req);
 
-    const existingFile =
-      await prisma.file.findFirst({
-        where: {
-          id,
+      const existingFile =
+        await prisma.file.findFirst({
+          where: {
+            id,
+            userId,
+          },
+        });
+
+      if (!existingFile) {
+        return res.status(404).json({
+          success: false,
+          message: "File not found.",
+        });
+      }
+
+      /*
+       * Validate the FINAL relationship state.
+       *
+       * This is important when only one relation is changed
+       * during a PATCH request.
+       */
+      const effectiveClientId =
+        data.clientId !== undefined
+          ? data.clientId
+          : existingFile.clientId;
+
+      const effectiveProjectId =
+        data.projectId !== undefined
+          ? data.projectId
+          : existingFile.projectId;
+
+      const relations =
+        await validateRelations(
           userId,
-        },
+          effectiveClientId,
+          effectiveProjectId,
+        );
+
+      if (!relations.valid) {
+        return res.status(400).json({
+          success: false,
+          message: relations.message,
+        });
+      }
+
+      const file =
+        await prisma.file.update({
+          where: {
+            id: existingFile.id,
+          },
+
+          data: {
+            ...(data.name !== undefined
+              ? {
+                  name: data.name,
+                }
+              : {}),
+
+            ...(data.folder !== undefined
+              ? {
+                  folder: data.folder,
+                }
+              : {}),
+
+            ...(data.shared !== undefined
+              ? {
+                  shared: data.shared,
+                }
+              : {}),
+
+            ...(data.client !== undefined
+              ? {
+                  client: data.client,
+                }
+              : {}),
+
+            ...(data.project !== undefined
+              ? {
+                  project: data.project,
+                }
+              : {}),
+
+            ...(data.clientId !== undefined
+              ? {
+                  clientId: data.clientId,
+                }
+              : {}),
+
+            ...(data.projectId !== undefined
+              ? {
+                  projectId: data.projectId,
+                }
+              : {}),
+          },
+        });
+
+      return res.json({
+        success: true,
+        message:
+          "File updated successfully.",
+        data: file,
       });
-
-    if (!existingFile) {
-      return res.status(404).json({
-        success: false,
-        message: "File not found.",
-      });
-    }
-
-    const effectiveClientId =
-      data.clientId !== undefined
-        ? data.clientId
-        : existingFile.clientId;
-
-    const effectiveProjectId =
-      data.projectId !== undefined
-        ? data.projectId
-        : existingFile.projectId;
-
-    const relations =
-      await validateRelations(
-        userId,
-        effectiveClientId,
-        effectiveProjectId,
+    } catch (error) {
+      console.error(
+        "PATCH /api/files/:id error:",
+        error,
       );
 
-    if (!relations.valid) {
-      return res.status(400).json({
+      return res.status(500).json({
         success: false,
-        message: relations.message,
+        message: "Failed to update file.",
       });
     }
-
-    const file =
-      await prisma.file.update({
-        where: {
-          id,
-        },
-
-        data: {
-          ...(data.name !== undefined
-            ? {
-                name: data.name,
-              }
-            : {}),
-
-          ...(data.folder !== undefined
-            ? {
-                folder: data.folder,
-              }
-            : {}),
-
-          ...(data.shared !== undefined
-            ? {
-                shared: data.shared,
-              }
-            : {}),
-
-          ...(data.client !== undefined
-            ? {
-                client: data.client,
-              }
-            : {}),
-
-          ...(data.project !== undefined
-            ? {
-                project: data.project,
-              }
-            : {}),
-
-          ...(data.clientId !== undefined
-            ? {
-                clientId: data.clientId,
-              }
-            : {}),
-
-          ...(data.projectId !== undefined
-            ? {
-                projectId: data.projectId,
-              }
-            : {}),
-        },
-      });
-
-    return res.json({
-      success: true,
-      message:
-        "File updated successfully.",
-      data: file,
-    });
-  } catch (error) {
-    console.error(
-      "PATCH /api/files/:id error:",
-      error,
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update file.",
-    });
-  }
-});
+  },
+);
 
 /**
  * DELETE /api/files/:id
  */
-router.delete("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.delete(
+  "/:id",
+  requirePermission("files.delete"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid file ID.",
-      });
-    }
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file ID.",
+        });
+      }
 
-    const userId = getUserId(req);
+      const userId = getUserId(req);
 
-    const existingFile =
-      await prisma.file.findFirst({
+      const existingFile =
+        await prisma.file.findFirst({
+          where: {
+            id,
+            userId,
+          },
+        });
+
+      if (!existingFile) {
+        return res.status(404).json({
+          success: false,
+          message: "File not found.",
+        });
+      }
+
+      const filePath = path.join(
+        uploadDirectory,
+        path.basename(
+          existingFile.storagePath,
+        ),
+      );
+
+      await prisma.file.delete({
         where: {
-          id,
-          userId,
+          id: existingFile.id,
         },
       });
 
-    if (!existingFile) {
-      return res.status(404).json({
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      return res.json({
+        success: true,
+        message:
+          "File deleted successfully.",
+      });
+    } catch (error) {
+      console.error(
+        "DELETE /api/files/:id error:",
+        error,
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "File not found.",
+        message: "Failed to delete file.",
       });
     }
-
-    const filePath = path.join(
-      uploadDirectory,
-      path.basename(
-        existingFile.storagePath,
-      ),
-    );
-
-    await prisma.file.delete({
-      where: {
-        id,
-      },
-    });
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    return res.json({
-      success: true,
-      message:
-        "File deleted successfully.",
-    });
-  } catch (error) {
-    console.error(
-      "DELETE /api/files/:id error:",
-      error,
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete file.",
-    });
-  }
-});
+  },
+);
 
 export default router;

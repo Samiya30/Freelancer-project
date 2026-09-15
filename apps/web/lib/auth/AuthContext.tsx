@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import type { ReactNode } from "react";
@@ -18,50 +19,104 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   phone: string;
+
+  /*
+   * Kept for backwards compatibility.
+   *
+   * The authoritative role is authorization.roleName.
+   */
   role: string;
+
   bio: string;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface AuthorizationContext {
+  workspaceId: number;
+  workspaceName: string;
+  memberId: number;
+  roleId: number;
+  roleName: string;
+  status: string;
+  permissions: string[];
+}
+
 interface AuthResponseData {
   user: AuthUser;
+  authorization?: AuthorizationContext | null;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
+  authorization: AuthorizationContext | null;
   loading: boolean;
   isAuthenticated: boolean;
+
   refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
+
+  hasPermission: (
+    permission: string,
+  ) => boolean;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(
-  undefined,
-);
+const AuthContext =
+  createContext<AuthContextValue | undefined>(
+    undefined,
+  );
 
 export function AuthProvider({
   children,
 }: {
   children: ReactNode;
 }): ReactNode {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] =
+    useState<AuthUser | null>(null);
 
-  const refreshUser = useCallback(async () => {
-    try {
-      const response =
-        await api.get<AuthResponseData>("/api/auth/me");
+  const [authorization, setAuthorization] =
+    useState<AuthorizationContext | null>(null);
 
-      if (response.success && response.data?.user) {
+  const [loading, setLoading] =
+    useState(true);
+
+  const applyAuthResponse = useCallback(
+    (response: {
+      success: boolean;
+      data?: AuthResponseData;
+    }) => {
+      if (
+        response.success &&
+        response.data?.user
+      ) {
         setUser(response.data.user);
+        setAuthorization(
+          response.data.authorization ?? null,
+        );
       } else {
         setUser(null);
+        setAuthorization(null);
       }
-    } catch {
-      setUser(null);
-    }
-  }, []);
+    },
+    [],
+  );
+
+  const refreshUser = useCallback(
+    async () => {
+      try {
+        const response =
+          await api.get<AuthResponseData>(
+            "/api/auth/me",
+          );
+
+        applyAuthResponse(response);
+      } catch {
+        setUser(null);
+        setAuthorization(null);
+      }
+    },
+    [applyAuthResponse],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -69,20 +124,19 @@ export function AuthProvider({
     async function loadSession() {
       try {
         const response =
-          await api.get<AuthResponseData>("/api/auth/me");
+          await api.get<AuthResponseData>(
+            "/api/auth/me",
+          );
 
         if (cancelled) {
           return;
         }
 
-        if (response.success && response.data?.user) {
-          setUser(response.data.user);
-        } else {
-          setUser(null);
-        }
+        applyAuthResponse(response);
       } catch {
         if (!cancelled) {
           setUser(null);
+          setAuthorization(null);
         }
       } finally {
         if (!cancelled) {
@@ -96,26 +150,58 @@ export function AuthProvider({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyAuthResponse]);
 
   const logout = useCallback(async () => {
     try {
-      await api.post("/api/auth/logout", {});
+      await api.post(
+        "/api/auth/logout",
+        {},
+      );
     } finally {
       setUser(null);
+      setAuthorization(null);
     }
   }, []);
 
+  const hasPermission = useCallback(
+    (permission: string): boolean => {
+      if (!authorization) {
+        return false;
+      }
+
+      return authorization.permissions.includes(
+        permission,
+      );
+    },
+    [authorization],
+  );
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      authorization,
+      loading,
+      isAuthenticated:
+        user !== null &&
+        authorization !== null,
+
+      refreshUser,
+      logout,
+      hasPermission,
+    }),
+    [
+      user,
+      authorization,
+      loading,
+      refreshUser,
+      logout,
+      hasPermission,
+    ],
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        isAuthenticated: user !== null,
-        refreshUser,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
@@ -125,7 +211,9 @@ export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
 
   if (!context) {
-    throw new Error("useAuth must be used inside AuthProvider");
+    throw new Error(
+      "useAuth must be used inside AuthProvider",
+    );
   }
 
   return context;

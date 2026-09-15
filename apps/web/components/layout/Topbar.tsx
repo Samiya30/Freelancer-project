@@ -8,7 +8,7 @@ interface TopbarProps {
 }
 
 export default function Topbar({ onMenuClick }: TopbarProps) {
-  const { user, logout } = useAuth();
+  const { user, authorization, logout } = useAuth();
 
   const displayName =
     user?.firstName ||
@@ -72,7 +72,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
               {displayName}
             </p>
             <p className="text-[11px] text-slate-400">
-              {user?.role || "Freelancer"}
+              {authorization?.roleName || "Freelancer"}
             </p>
           </div>
 

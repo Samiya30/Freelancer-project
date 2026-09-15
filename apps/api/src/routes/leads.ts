@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -77,256 +78,313 @@ async function validateClient(
 
 /*
  * GET /api/leads
+ *
+ * Requires:
+ * - Authentication
+ * - leads.view permission
+ *
+ * Ownership:
+ * - Only returns leads belonging to the authenticated user.
  */
-router.get("/", async (req, res) => {
-  try {
-    const userId = getUserId(req);
+router.get(
+  "/",
+  requirePermission("leads.view"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
 
-    const leads = await prisma.lead.findMany({
-      where: {
-        userId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+      const leads = await prisma.lead.findMany({
+        where: {
+          userId,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
 
-    return res.status(200).json({
-      success: true,
-      data: leads,
-    });
-  } catch (error) {
-    console.error("GET /api/leads error:", error);
+      return res.status(200).json({
+        success: true,
+        data: leads,
+      });
+    } catch (error) {
+      console.error("GET /api/leads error:", error);
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch leads",
-    });
-  }
-});
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch leads",
+      });
+    }
+  },
+);
 
 /*
  * GET /api/leads/:id
+ *
+ * Requires:
+ * - Authentication
+ * - leads.view permission
+ *
+ * Ownership:
+ * - The lead must belong to the authenticated user.
  */
-router.get("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.get(
+  "/:id",
+  requirePermission("leads.view"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead ID",
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const lead = await prisma.lead.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!lead) {
+        return res.status(404).json({
+          success: false,
+          message: "Lead not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: lead,
+      });
+    } catch (error) {
+      console.error("GET /api/leads/:id error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid lead ID",
+        message: "Failed to fetch lead",
       });
     }
-
-    const userId = getUserId(req);
-
-    const lead = await prisma.lead.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!lead) {
-      return res.status(404).json({
-        success: false,
-        message: "Lead not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: lead,
-    });
-  } catch (error) {
-    console.error("GET /api/leads/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch lead",
-    });
-  }
-});
+  },
+);
 
 /*
  * POST /api/leads
+ *
+ * Requires:
+ * - Authentication
+ * - leads.create permission
+ *
+ * Ownership:
+ * - New lead is always assigned to the authenticated user.
+ * - clientId must belong to the authenticated user.
  */
-router.post("/", async (req, res) => {
-  try {
-    const parsed = createLeadSchema.safeParse(req.body);
+router.post(
+  "/",
+  requirePermission("leads.create"),
+  async (req, res) => {
+    try {
+      const parsed = createLeadSchema.safeParse(req.body);
 
-    if (!parsed.success) {
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead data",
+          errors: parsed.error.flatten(),
+        });
+      }
+
+      const userId = getUserId(req);
+
+      await validateClient(userId, parsed.data.clientId);
+
+      const lead = await prisma.lead.create({
+        data: {
+          userId,
+          name: parsed.data.name,
+          email: parsed.data.email,
+          company: parsed.data.company,
+          source: parsed.data.source,
+          value: parsed.data.value,
+          status: parsed.data.status ?? "New",
+          ...(parsed.data.phone !== undefined && {
+            phone: parsed.data.phone,
+          }),
+          ...(parsed.data.clientId !== undefined && {
+            clientId: parsed.data.clientId,
+          }),
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Lead created successfully",
+        data: lead,
+      });
+    } catch (error) {
+      console.error("POST /api/leads error:", error);
+
       return res.status(400).json({
         success: false,
-        message: "Invalid lead data",
-        errors: parsed.error.flatten(),
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to create lead",
       });
     }
-
-    const userId = getUserId(req);
-
-    await validateClient(userId, parsed.data.clientId);
-
-    const lead = await prisma.lead.create({
-      data: {
-        userId,
-        name: parsed.data.name,
-        email: parsed.data.email,
-        company: parsed.data.company,
-        source: parsed.data.source,
-        value: parsed.data.value,
-        status: parsed.data.status ?? "New",
-        ...(parsed.data.phone !== undefined && {
-          phone: parsed.data.phone,
-        }),
-        ...(parsed.data.clientId !== undefined && {
-          clientId: parsed.data.clientId,
-        }),
-      },
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Lead created successfully",
-      data: lead,
-    });
-  } catch (error) {
-    console.error("POST /api/leads error:", error);
-
-    return res.status(400).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to create lead",
-    });
-  }
-});
+  },
+);
 
 /*
  * PATCH /api/leads/:id
+ *
+ * Requires:
+ * - Authentication
+ * - leads.update permission
+ *
+ * Ownership:
+ * - Existing lead must belong to the authenticated user.
+ * - New clientId must also belong to the authenticated user.
  */
-router.patch("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.patch(
+  "/:id",
+  requirePermission("leads.update"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead ID",
+        });
+      }
+
+      const parsed = updateLeadSchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead data",
+          errors: parsed.error.flatten(),
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const existingLead = await prisma.lead.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingLead) {
+        return res.status(404).json({
+          success: false,
+          message: "Lead not found",
+        });
+      }
+
+      if (parsed.data.clientId !== undefined) {
+        await validateClient(userId, parsed.data.clientId);
+      }
+
+      const updateData = Object.fromEntries(
+        Object.entries(parsed.data).filter(
+          ([, value]) => value !== undefined,
+        ),
+      );
+
+      const lead = await prisma.lead.update({
+        where: {
+          id: existingLead.id,
+        },
+        data: updateData,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Lead updated successfully",
+        data: lead,
+      });
+    } catch (error) {
+      console.error("PATCH /api/leads/:id error:", error);
+
       return res.status(400).json({
         success: false,
-        message: "Invalid lead ID",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to update lead",
       });
     }
-
-    const parsed = updateLeadSchema.safeParse(req.body);
-
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid lead data",
-        errors: parsed.error.flatten(),
-      });
-    }
-
-    const userId = getUserId(req);
-
-    const existingLead = await prisma.lead.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingLead) {
-      return res.status(404).json({
-        success: false,
-        message: "Lead not found",
-      });
-    }
-
-    if (parsed.data.clientId !== undefined) {
-      await validateClient(userId, parsed.data.clientId);
-    }
-
-    const updateData = Object.fromEntries(
-      Object.entries(parsed.data).filter(
-        ([, value]) => value !== undefined,
-      ),
-    );
-
-    const lead = await prisma.lead.update({
-      where: {
-        id: existingLead.id,
-      },
-      data: updateData,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Lead updated successfully",
-      data: lead,
-    });
-  } catch (error) {
-    console.error("PATCH /api/leads/:id error:", error);
-
-    return res.status(400).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to update lead",
-    });
-  }
-});
+  },
+);
 
 /*
  * DELETE /api/leads/:id
+ *
+ * Requires:
+ * - Authentication
+ * - leads.delete permission
+ *
+ * Ownership:
+ * - Existing lead must belong to the authenticated user.
  */
-router.delete("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.delete(
+  "/:id",
+  requirePermission("leads.delete"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead ID",
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const existingLead = await prisma.lead.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingLead) {
+        return res.status(404).json({
+          success: false,
+          message: "Lead not found",
+        });
+      }
+
+      await prisma.lead.delete({
+        where: {
+          id: existingLead.id,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Lead deleted successfully",
+      });
+    } catch (error) {
+      console.error("DELETE /api/leads/:id error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid lead ID",
+        message: "Failed to delete lead",
       });
     }
-
-    const userId = getUserId(req);
-
-    const existingLead = await prisma.lead.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingLead) {
-      return res.status(404).json({
-        success: false,
-        message: "Lead not found",
-      });
-    }
-
-    await prisma.lead.delete({
-      where: {
-        id: existingLead.id,
-      },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Lead deleted successfully",
-    });
-  } catch (error) {
-    console.error("DELETE /api/leads/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete lead",
-    });
-  }
-});
+  },
+);
 
 export default router;

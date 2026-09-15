@@ -3,15 +3,16 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/permissions.js";
 
 const router = Router();
 
 const paymentSchema = z.object({
-  paymentNumber: z.string().min(1).max(100),
-  clientName: z.string().min(1).max(200),
-  invoiceNumber: z.string().min(1).max(100),
-  projectName: z.string().min(1).max(200),
-  amount: z.number().positive(),
+  paymentNumber: z.string().trim().min(1).max(100),
+  clientName: z.string().trim().min(1).max(200),
+  invoiceNumber: z.string().trim().min(1).max(100),
+  projectName: z.string().trim().min(1).max(200),
+  amount: z.number().finite().positive(),
   date: z.coerce.date(),
   method: z.enum(["UPI", "BankTransfer", "Card", "Cash"]),
   status: z.enum(["Completed", "Pending", "Failed"]),
@@ -38,6 +39,14 @@ function getUserId(req: Request): number {
   return userId;
 }
 
+/**
+ * Validates all selected relationships against the authenticated user.
+ *
+ * Also validates:
+ * Client -> Invoice
+ * Project -> Invoice
+ * Client -> Project
+ */
 async function validateRelations(
   userId: number,
   data: {
@@ -142,155 +151,79 @@ async function validateRelations(
 
 /**
  * GET /api/payments
+ *
+ * Requires:
+ * - Authentication
+ * - payments.view permission
+ *
+ * Ownership:
+ * - Only returns payments belonging to authenticated user.
  */
-router.get("/", async (req, res) => {
-  try {
-    const userId = getUserId(req);
+router.get(
+  "/",
+  requirePermission("payments.view"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
 
-    const payments = await prisma.payment.findMany({
-      where: {
-        userId,
-      },
-      include: {
-        clientRecord: true,
-        invoice: true,
-        projectRecord: true,
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
+      const payments = await prisma.payment.findMany({
+        where: {
+          userId,
+        },
+        include: {
+          clientRecord: true,
+          invoice: true,
+          projectRecord: true,
+        },
+        orderBy: {
+          date: "desc",
+        },
+      });
 
-    return res.json({
-      success: true,
-      data: payments,
-    });
-  } catch (error) {
-    console.error("GET /api/payments error:", error);
+      return res.json({
+        success: true,
+        data: payments,
+      });
+    } catch (error) {
+      console.error("GET /api/payments error:", error);
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch payments",
-    });
-  }
-});
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch payments",
+      });
+    }
+  },
+);
 
 /**
  * GET /api/payments/:id
+ *
+ * Requires:
+ * - Authentication
+ * - payments.view permission
+ *
+ * Ownership:
+ * - Payment must belong to authenticated user.
  */
-router.get("/:id", async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const id = Number(req.params.id);
+router.get(
+  "/:id",
+  requirePermission("payments.view"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid payment ID",
-      });
-    }
-
-    const payment = await prisma.payment.findFirst({
-      where: {
-        id,
-        userId,
-      },
-      include: {
-        clientRecord: true,
-        invoice: true,
-        projectRecord: true,
-      },
-    });
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: payment,
-    });
-  } catch (error) {
-    console.error("GET /api/payments/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch payment",
-    });
-  }
-});
-
-/**
- * POST /api/payments
- */
-router.post("/", async (req, res) => {
-  try {
-    const data = paymentSchema.parse(req.body);
-    const userId = getUserId(req);
-
-    const relations = await validateRelations(userId, data);
-
-    const existingPayment = await prisma.payment.findUnique({
-      where: {
-        paymentNumber: data.paymentNumber,
-      },
-    });
-
-    if (existingPayment) {
-      return res.status(409).json({
-        success: false,
-        message: "Payment number already exists",
-      });
-    }
-
-    if (data.status === "Completed" && !data.invoiceId) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "A completed payment must be linked to an invoice",
-      });
-    }
-
-    const payment = await prisma.$transaction(async (tx) => {
-      const createdPayment = await tx.payment.create({
-        data: {
-          paymentNumber: data.paymentNumber,
-          clientName: data.clientName,
-          invoiceNumber: data.invoiceNumber,
-          projectName: data.projectName,
-          amount: data.amount,
-          date: data.date,
-          method: data.method,
-          status: data.status,
-          userId,
-          clientId: data.clientId ?? null,
-          invoiceId: data.invoiceId ?? null,
-          projectId: data.projectId ?? null,
-        },
-        include: {
-          clientRecord: true,
-          invoice: true,
-          projectRecord: true,
-        },
-      });
-
-      if (data.status === "Completed" && relations.invoice) {
-        await tx.invoice.update({
-          where: {
-            id: relations.invoice.id,
-          },
-          data: {
-            status: "Paid",
-          },
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid payment ID",
         });
       }
 
-      return tx.payment.findUnique({
+      const payment = await prisma.payment.findFirst({
         where: {
-          id: createdPayment.id,
+          id,
+          userId,
         },
         include: {
           clientRecord: true,
@@ -298,253 +231,440 @@ router.post("/", async (req, res) => {
           projectRecord: true,
         },
       });
-    });
 
-    return res.status(201).json({
-      success: true,
-      message: "Payment created successfully",
-      data: payment,
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message: "Payment not found",
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: payment,
+      });
+    } catch (error) {
+      console.error("GET /api/payments/:id error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid payment data",
-        errors: error.flatten(),
+        message: "Failed to fetch payment",
       });
     }
-
-    console.error("POST /api/payments error:", error);
-
-    return res.status(400).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to create payment",
-    });
-  }
-});
+  },
+);
 
 /**
- * PATCH /api/payments/:id
+ * POST /api/payments
+ *
+ * Requires:
+ * - Authentication
+ * - payments.create permission
+ *
+ * Ownership:
+ * - Payment belongs to authenticated user.
+ * - All linked records belong to authenticated user.
  */
-router.patch("/:id", async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const id = Number(req.params.id);
+router.post(
+  "/",
+  requirePermission("payments.create"),
+  async (req, res) => {
+    try {
+      const data = paymentSchema.parse(req.body);
+      const userId = getUserId(req);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid payment ID",
-      });
-    }
+      const relations = await validateRelations(userId, data);
 
-    const data = updatePaymentSchema.parse(req.body);
+      if (data.status === "Completed" && !data.invoiceId) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "A completed payment must be linked to an invoice",
+        });
+      }
 
-    const existingPayment = await prisma.payment.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingPayment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
-    }
-
-    const relationData = {
-      clientId:
-        data.clientId !== undefined
-          ? data.clientId
-          : existingPayment.clientId,
-
-      invoiceId:
-        data.invoiceId !== undefined
-          ? data.invoiceId
-          : existingPayment.invoiceId,
-
-      projectId:
-        data.projectId !== undefined
-          ? data.projectId
-          : existingPayment.projectId,
-    };
-
-    const relations = await validateRelations(
-      userId,
-      relationData,
-    );
-
-    const newStatus =
-      data.status ?? existingPayment.status;
-
-    const newInvoiceId =
-      relationData.invoiceId ?? null;
-
-    if (newStatus === "Completed" && !newInvoiceId) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "A completed payment must be linked to an invoice",
-      });
-    }
-
-    if (data.paymentNumber) {
-      const duplicate = await prisma.payment.findFirst({
+      const existingPayment = await prisma.payment.findUnique({
         where: {
           paymentNumber: data.paymentNumber,
-          id: {
-            not: id,
-          },
         },
       });
 
-      if (duplicate) {
+      if (existingPayment) {
         return res.status(409).json({
           success: false,
           message: "Payment number already exists",
         });
       }
-    }
 
-    const payment = await prisma.$transaction(async (tx) => {
-      const updatedPayment = await tx.payment.update({
-        where: {
-          id,
-        },
-        data: {
-          ...(data.paymentNumber !== undefined && {
+      /*
+       * If an invoice is supplied, keep the payment's
+       * denormalized display information synchronized with it.
+       */
+      const clientName =
+        relations.client?.name ?? data.clientName;
+
+      const invoiceNumber =
+        relations.invoice?.number ?? data.invoiceNumber;
+
+      const projectName =
+        relations.project?.name ?? data.projectName;
+
+      const payment = await prisma.$transaction(async (tx) => {
+        const createdPayment = await tx.payment.create({
+          data: {
             paymentNumber: data.paymentNumber,
-          }),
-          ...(data.clientName !== undefined && {
-            clientName: data.clientName,
-          }),
-          ...(data.invoiceNumber !== undefined && {
-            invoiceNumber: data.invoiceNumber,
-          }),
-          ...(data.projectName !== undefined && {
-            projectName: data.projectName,
-          }),
-          ...(data.amount !== undefined && {
+            clientName,
+            invoiceNumber,
+            projectName,
             amount: data.amount,
-          }),
-          ...(data.date !== undefined && {
             date: data.date,
-          }),
-          ...(data.method !== undefined && {
             method: data.method,
-          }),
-          ...(data.status !== undefined && {
             status: data.status,
-          }),
-          ...(data.clientId !== undefined && {
-            clientId: data.clientId,
-          }),
-          ...(data.invoiceId !== undefined && {
-            invoiceId: data.invoiceId,
-          }),
-          ...(data.projectId !== undefined && {
-            projectId: data.projectId,
-          }),
-        },
-        include: {
-          clientRecord: true,
-          invoice: true,
-          projectRecord: true,
-        },
+            userId,
+            clientId: relations.client?.id ?? null,
+            invoiceId: relations.invoice?.id ?? null,
+            projectId: relations.project?.id ?? null,
+          },
+        });
+
+        /*
+         * Only the validated invoice belonging to this user
+         * can be marked as Paid.
+         */
+        if (data.status === "Completed" && relations.invoice) {
+          await tx.invoice.update({
+            where: {
+              id: relations.invoice.id,
+            },
+            data: {
+              status: "Paid",
+            },
+          });
+        }
+
+        return tx.payment.findUnique({
+          where: {
+            id: createdPayment.id,
+          },
+          include: {
+            clientRecord: true,
+            invoice: true,
+            projectRecord: true,
+          },
+        });
       });
 
-      if (newStatus === "Completed" && relations.invoice) {
-        await tx.invoice.update({
-          where: {
-            id: relations.invoice.id,
-          },
-          data: {
-            status: "Paid",
-          },
+      return res.status(201).json({
+        success: true,
+        message: "Payment created successfully",
+        data: payment,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid payment data",
+          errors: error.flatten(),
         });
       }
 
-      return updatedPayment;
-    });
+      console.error("POST /api/payments error:", error);
 
-    return res.json({
-      success: true,
-      message: "Payment updated successfully",
-      data: payment,
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
       return res.status(400).json({
         success: false,
-        message: "Invalid payment data",
-        errors: error.flatten(),
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to create payment",
       });
     }
+  },
+);
 
-    console.error("PATCH /api/payments/:id error:", error);
+/**
+ * PATCH /api/payments/:id
+ *
+ * Requires:
+ * - Authentication
+ * - payments.update permission
+ *
+ * Ownership:
+ * - Existing payment must belong to authenticated user.
+ * - Final client/invoice/project must belong to authenticated user.
+ */
+router.patch(
+  "/:id",
+  requirePermission("payments.update"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const id = Number(req.params.id);
 
-    return res.status(400).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to update payment",
-    });
-  }
-});
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid payment ID",
+        });
+      }
+
+      const data = updatePaymentSchema.parse(req.body);
+
+      const existingPayment = await prisma.payment.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingPayment) {
+        return res.status(404).json({
+          success: false,
+          message: "Payment not found",
+        });
+      }
+
+      /*
+       * Resolve the FINAL relationships after the update.
+       */
+      const finalClientId =
+        data.clientId !== undefined
+          ? data.clientId
+          : existingPayment.clientId;
+
+      const finalInvoiceId =
+        data.invoiceId !== undefined
+          ? data.invoiceId
+          : existingPayment.invoiceId;
+
+      const finalProjectId =
+        data.projectId !== undefined
+          ? data.projectId
+          : existingPayment.projectId;
+
+      const relations = await validateRelations(userId, {
+        clientId: finalClientId,
+        invoiceId: finalInvoiceId,
+        projectId: finalProjectId,
+      });
+
+      const newStatus =
+        data.status ?? existingPayment.status;
+
+      if (newStatus === "Completed" && !finalInvoiceId) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "A completed payment must be linked to an invoice",
+        });
+      }
+
+      if (
+        data.paymentNumber !== undefined &&
+        data.paymentNumber !== existingPayment.paymentNumber
+      ) {
+        const duplicate = await prisma.payment.findFirst({
+          where: {
+            paymentNumber: data.paymentNumber,
+            id: {
+              not: id,
+            },
+          },
+        });
+
+        if (duplicate) {
+          return res.status(409).json({
+            success: false,
+            message: "Payment number already exists",
+          });
+        }
+      }
+
+      const payment = await prisma.$transaction(async (tx) => {
+        const updateData: Record<string, unknown> = {};
+
+        if (data.paymentNumber !== undefined) {
+          updateData.paymentNumber = data.paymentNumber;
+        }
+
+        if (data.clientName !== undefined) {
+          updateData.clientName = data.clientName;
+        }
+
+        if (data.invoiceNumber !== undefined) {
+          updateData.invoiceNumber = data.invoiceNumber;
+        }
+
+        if (data.projectName !== undefined) {
+          updateData.projectName = data.projectName;
+        }
+
+        if (data.amount !== undefined) {
+          updateData.amount = data.amount;
+        }
+
+        if (data.date !== undefined) {
+          updateData.date = data.date;
+        }
+
+        if (data.method !== undefined) {
+          updateData.method = data.method;
+        }
+
+        if (data.status !== undefined) {
+          updateData.status = data.status;
+        }
+
+        if (data.clientId !== undefined) {
+          updateData.clientId = data.clientId;
+
+          if (relations.client) {
+            updateData.clientName = relations.client.name;
+          }
+        }
+
+        if (data.invoiceId !== undefined) {
+          updateData.invoiceId = data.invoiceId;
+
+          if (relations.invoice) {
+            updateData.invoiceNumber = relations.invoice.number;
+          }
+        }
+
+        if (data.projectId !== undefined) {
+          updateData.projectId = data.projectId;
+
+          if (relations.project) {
+            updateData.projectName = relations.project.name;
+          }
+        }
+
+        const updatedPayment = await tx.payment.update({
+          where: {
+            id: existingPayment.id,
+          },
+          data: updateData,
+        });
+
+        /*
+         * If this payment is now completed, mark its validated
+         * invoice as Paid.
+         */
+        if (newStatus === "Completed" && relations.invoice) {
+          await tx.invoice.update({
+            where: {
+              id: relations.invoice.id,
+            },
+            data: {
+              status: "Paid",
+            },
+          });
+        }
+
+        /*
+         * If the payment was previously Completed and its invoice
+         * is changed, do not automatically alter the old invoice's
+         * status. Invoice status should be managed by invoice/payment
+         * business rules rather than assuming that removing a payment
+         * makes an invoice unpaid.
+         */
+
+        return tx.payment.findUnique({
+          where: {
+            id: updatedPayment.id,
+          },
+          include: {
+            clientRecord: true,
+            invoice: true,
+            projectRecord: true,
+          },
+        });
+      });
+
+      return res.json({
+        success: true,
+        message: "Payment updated successfully",
+        data: payment,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid payment data",
+          errors: error.flatten(),
+        });
+      }
+
+      console.error("PATCH /api/payments/:id error:", error);
+
+      return res.status(400).json({
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to update payment",
+      });
+    }
+  },
+);
 
 /**
  * DELETE /api/payments/:id
+ *
+ * Requires:
+ * - Authentication
+ * - payments.delete permission
+ *
+ * Ownership:
+ * - Payment must belong to authenticated user.
  */
-router.delete("/:id", async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const id = Number(req.params.id);
+router.delete(
+  "/:id",
+  requirePermission("payments.delete"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid payment ID",
+        });
+      }
+
+      const existingPayment = await prisma.payment.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingPayment) {
+        return res.status(404).json({
+          success: false,
+          message: "Payment not found",
+        });
+      }
+
+      await prisma.payment.delete({
+        where: {
+          id: existingPayment.id,
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: "Payment deleted successfully",
+      });
+    } catch (error) {
+      console.error("DELETE /api/payments/:id error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid payment ID",
+        message: "Failed to delete payment",
       });
     }
-
-    const existingPayment = await prisma.payment.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingPayment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
-    }
-
-    await prisma.payment.delete({
-      where: {
-        id,
-      },
-    });
-
-    return res.json({
-      success: true,
-      message: "Payment deleted successfully",
-    });
-  } catch (error) {
-    console.error("DELETE /api/payments/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete payment",
-    });
-  }
-});
+  },
+);
 
 export default router;

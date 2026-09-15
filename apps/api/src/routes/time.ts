@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -12,7 +13,7 @@ const createTimeEntrySchema = z.object({
   date: z.string().datetime(),
   duration: z.number().int().positive(),
   billable: z.boolean().optional(),
-  hourlyRate: z.number().min(0).optional(),
+  hourlyRate: z.number().finite().min(0).optional(),
 });
 
 const updateTimeEntrySchema = z.object({
@@ -22,7 +23,7 @@ const updateTimeEntrySchema = z.object({
   date: z.string().datetime().optional(),
   duration: z.number().int().positive().optional(),
   billable: z.boolean().optional(),
-  hourlyRate: z.number().min(0).optional(),
+  hourlyRate: z.number().finite().min(0).optional(),
 });
 
 router.use(requireAuth);
@@ -41,232 +42,136 @@ function getUserId(req: Request): number {
   return userId;
 }
 
-router.get("/", async (req, res) => {
-  try {
-    const userId = getUserId(req);
+/**
+ * GET /api/time
+ *
+ * Requires:
+ * - Authentication
+ * - time.view permission
+ *
+ * Ownership:
+ * - Only returns entries belonging to the authenticated user.
+ */
+router.get(
+  "/",
+  requirePermission("time.view"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
 
-    const entries = await prisma.timeEntry.findMany({
-      where: {
-        userId,
-      },
-      orderBy: [
-        {
-          date: "desc",
-        },
-        {
-          createdAt: "desc",
-        },
-      ],
-    });
-
-    return res.json({
-      success: true,
-      data: entries,
-    });
-  } catch (error) {
-    console.error("Failed to fetch time entries:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch time entries",
-    });
-  }
-});
-
-router.get("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid time entry ID",
-      });
-    }
-
-    const userId = getUserId(req);
-
-    const entry = await prisma.timeEntry.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!entry) {
-      return res.status(404).json({
-        success: false,
-        message: "Time entry not found",
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: entry,
-    });
-  } catch (error) {
-    console.error("Failed to fetch time entry:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch time entry",
-    });
-  }
-});
-
-router.post("/", async (req, res) => {
-  try {
-    const parsed = createTimeEntrySchema.safeParse(req.body);
-
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid time entry data",
-        errors: parsed.error.flatten(),
-      });
-    }
-
-    const userId = getUserId(req);
-
-    const project = await prisma.project.findFirst({
-      where: {
-        id: parsed.data.projectId,
-        userId,
-      },
-    });
-
-    if (!project) {
-      return res.status(400).json({
-        success: false,
-        message: "Project not found",
-      });
-    }
-
-    let taskId: number | null = null;
-    let taskName: string | null = null;
-
-    if (parsed.data.taskId !== undefined) {
-      const task = await prisma.task.findFirst({
+      const entries = await prisma.timeEntry.findMany({
         where: {
-          id: parsed.data.taskId,
-          projectId: project.id,
+          userId,
+        },
+        orderBy: [
+          {
+            date: "desc",
+          },
+          {
+            createdAt: "desc",
+          },
+        ],
+      });
+
+      return res.json({
+        success: true,
+        data: entries,
+      });
+    } catch (error) {
+      console.error("Failed to fetch time entries:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch time entries",
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/time/:id
+ *
+ * Requires:
+ * - Authentication
+ * - time.view permission
+ *
+ * Ownership:
+ * - Time entry must belong to authenticated user.
+ */
+router.get(
+  "/:id",
+  requirePermission("time.view"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time entry ID",
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const entry = await prisma.timeEntry.findFirst({
+        where: {
+          id,
           userId,
         },
       });
 
-      if (!task) {
-        return res.status(400).json({
+      if (!entry) {
+        return res.status(404).json({
           success: false,
-          message: "Task not found for the selected project",
+          message: "Time entry not found",
         });
       }
 
-      taskId = task.id;
-      taskName = task.title;
-    }
+      return res.json({
+        success: true,
+        data: entry,
+      });
+    } catch (error) {
+      console.error("Failed to fetch time entry:", error);
 
-    const entry = await prisma.timeEntry.create({
-      data: {
-        userId,
-        description: parsed.data.description,
-        projectId: project.id,
-        projectName: project.name,
-        taskId,
-        taskName,
-        date: new Date(parsed.data.date),
-        duration: parsed.data.duration,
-        billable: parsed.data.billable ?? true,
-        hourlyRate: parsed.data.hourlyRate ?? 0,
-      },
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Time entry created successfully",
-      data: entry,
-    });
-  } catch (error) {
-    console.error("Failed to create time entry:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create time entry",
-    });
-  }
-});
-
-router.patch("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      return res.status(500).json({
         success: false,
-        message: "Invalid time entry ID",
+        message: "Failed to fetch time entry",
       });
     }
+  },
+);
 
-    const parsed = updateTimeEntrySchema.safeParse(req.body);
+/**
+ * POST /api/time
+ *
+ * Requires:
+ * - Authentication
+ * - time.create permission
+ *
+ * Ownership:
+ * - Entry belongs to authenticated user.
+ * - Project must belong to authenticated user.
+ * - Optional task must belong to authenticated user and selected project.
+ */
+router.post(
+  "/",
+  requirePermission("time.create"),
+  async (req, res) => {
+    try {
+      const parsed = createTimeEntrySchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid time entry data",
-        errors: parsed.error.flatten(),
-      });
-    }
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time entry data",
+          errors: parsed.error.flatten(),
+        });
+      }
 
-    const userId = getUserId(req);
+      const userId = getUserId(req);
 
-    const existingEntry = await prisma.timeEntry.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingEntry) {
-      return res.status(404).json({
-        success: false,
-        message: "Time entry not found",
-      });
-    }
-
-    const updateData: {
-      description?: string;
-      projectId?: number;
-      projectName?: string;
-      taskId?: number | null;
-      taskName?: string | null;
-      date?: Date;
-      duration?: number;
-      billable?: boolean;
-      hourlyRate?: number;
-    } = {};
-
-    if (parsed.data.description !== undefined) {
-      updateData.description = parsed.data.description;
-    }
-
-    if (parsed.data.date !== undefined) {
-      updateData.date = new Date(parsed.data.date);
-    }
-
-    if (parsed.data.duration !== undefined) {
-      updateData.duration = parsed.data.duration;
-    }
-
-    if (parsed.data.billable !== undefined) {
-      updateData.billable = parsed.data.billable;
-    }
-
-    if (parsed.data.hourlyRate !== undefined) {
-      updateData.hourlyRate = parsed.data.hourlyRate;
-    }
-
-    let selectedProjectId = existingEntry.projectId;
-
-    if (parsed.data.projectId !== undefined) {
       const project = await prisma.project.findFirst({
         where: {
           id: parsed.data.projectId,
@@ -281,21 +186,14 @@ router.patch("/:id", async (req, res) => {
         });
       }
 
-      selectedProjectId = project.id;
+      let taskId: number | null = null;
+      let taskName: string | null = null;
 
-      updateData.projectId = project.id;
-      updateData.projectName = project.name;
-    }
-
-    if (parsed.data.taskId !== undefined) {
-      if (parsed.data.taskId === null) {
-        updateData.taskId = null;
-        updateData.taskName = null;
-      } else {
+      if (parsed.data.taskId !== undefined) {
         const task = await prisma.task.findFirst({
           where: {
             id: parsed.data.taskId,
-            projectId: selectedProjectId,
+            projectId: project.id,
             userId,
           },
         });
@@ -307,94 +205,271 @@ router.patch("/:id", async (req, res) => {
           });
         }
 
-        updateData.taskId = task.id;
-        updateData.taskName = task.title;
+        taskId = task.id;
+        taskName = task.title;
       }
-    } else if (
-      parsed.data.projectId !== undefined &&
-      existingEntry.taskId !== null
-    ) {
-      const existingTask = await prisma.task.findFirst({
+
+      const entry = await prisma.timeEntry.create({
+        data: {
+          userId,
+          description: parsed.data.description,
+          projectId: project.id,
+          projectName: project.name,
+          taskId,
+          taskName,
+          date: new Date(parsed.data.date),
+          duration: parsed.data.duration,
+          billable: parsed.data.billable ?? true,
+          hourlyRate: parsed.data.hourlyRate ?? 0,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Time entry created successfully",
+        data: entry,
+      });
+    } catch (error) {
+      console.error("Failed to create time entry:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to create time entry",
+      });
+    }
+  },
+);
+
+/**
+ * PATCH /api/time/:id
+ *
+ * Requires:
+ * - Authentication
+ * - time.update permission
+ *
+ * Ownership:
+ * - Existing entry must belong to authenticated user.
+ * - New project must belong to authenticated user.
+ * - New task must belong to authenticated user and selected project.
+ */
+router.patch(
+  "/:id",
+  requirePermission("time.update"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time entry ID",
+        });
+      }
+
+      const parsed = updateTimeEntrySchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time entry data",
+          errors: parsed.error.flatten(),
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const existingEntry = await prisma.timeEntry.findFirst({
         where: {
-          id: existingEntry.taskId,
-          projectId: selectedProjectId,
+          id,
           userId,
         },
       });
 
-      if (!existingTask) {
-        updateData.taskId = null;
-        updateData.taskName = null;
+      if (!existingEntry) {
+        return res.status(404).json({
+          success: false,
+          message: "Time entry not found",
+        });
       }
-    }
 
-    const entry = await prisma.timeEntry.update({
-      where: {
-        id,
-      },
-      data: updateData,
-    });
+      const updateData: {
+        description?: string;
+        projectId?: number;
+        projectName?: string;
+        taskId?: number | null;
+        taskName?: string | null;
+        date?: Date;
+        duration?: number;
+        billable?: boolean;
+        hourlyRate?: number;
+      } = {};
 
-    return res.json({
-      success: true,
-      message: "Time entry updated successfully",
-      data: entry,
-    });
-  } catch (error) {
-    console.error("Failed to update time entry:", error);
+      if (parsed.data.description !== undefined) {
+        updateData.description = parsed.data.description;
+      }
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update time entry",
-    });
-  }
-});
+      if (parsed.data.date !== undefined) {
+        updateData.date = new Date(parsed.data.date);
+      }
 
-router.delete("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+      if (parsed.data.duration !== undefined) {
+        updateData.duration = parsed.data.duration;
+      }
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (parsed.data.billable !== undefined) {
+        updateData.billable = parsed.data.billable;
+      }
+
+      if (parsed.data.hourlyRate !== undefined) {
+        updateData.hourlyRate = parsed.data.hourlyRate;
+      }
+
+      let selectedProjectId = existingEntry.projectId;
+
+      if (parsed.data.projectId !== undefined) {
+        const project = await prisma.project.findFirst({
+          where: {
+            id: parsed.data.projectId,
+            userId,
+          },
+        });
+
+        if (!project) {
+          return res.status(400).json({
+            success: false,
+            message: "Project not found",
+          });
+        }
+
+        selectedProjectId = project.id;
+
+        updateData.projectId = project.id;
+        updateData.projectName = project.name;
+      }
+
+      if (parsed.data.taskId !== undefined) {
+        if (parsed.data.taskId === null) {
+          updateData.taskId = null;
+          updateData.taskName = null;
+        } else {
+          const task = await prisma.task.findFirst({
+            where: {
+              id: parsed.data.taskId,
+              projectId: selectedProjectId,
+              userId,
+            },
+          });
+
+          if (!task) {
+            return res.status(400).json({
+              success: false,
+              message: "Task not found for the selected project",
+            });
+          }
+
+          updateData.taskId = task.id;
+          updateData.taskName = task.title;
+        }
+      } else if (
+        parsed.data.projectId !== undefined &&
+        existingEntry.taskId !== null
+      ) {
+        const existingTask = await prisma.task.findFirst({
+          where: {
+            id: existingEntry.taskId,
+            projectId: selectedProjectId,
+            userId,
+          },
+        });
+
+        if (!existingTask) {
+          updateData.taskId = null;
+          updateData.taskName = null;
+        }
+      }
+
+      const entry = await prisma.timeEntry.update({
+        where: {
+          id: existingEntry.id,
+        },
+        data: updateData,
+      });
+
+      return res.json({
+        success: true,
+        message: "Time entry updated successfully",
+        data: entry,
+      });
+    } catch (error) {
+      console.error("Failed to update time entry:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid time entry ID",
+        message: "Failed to update time entry",
       });
     }
+  },
+);
 
-    const userId = getUserId(req);
+/**
+ * DELETE /api/time/:id
+ *
+ * Requires:
+ * - Authentication
+ * - time.delete permission
+ *
+ * Ownership:
+ * - Entry must belong to authenticated user.
+ */
+router.delete(
+  "/:id",
+  requirePermission("time.delete"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    const existingEntry = await prisma.timeEntry.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time entry ID",
+        });
+      }
 
-    if (!existingEntry) {
-      return res.status(404).json({
+      const userId = getUserId(req);
+
+      const existingEntry = await prisma.timeEntry.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingEntry) {
+        return res.status(404).json({
+          success: false,
+          message: "Time entry not found",
+        });
+      }
+
+      await prisma.timeEntry.delete({
+        where: {
+          id: existingEntry.id,
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: "Time entry deleted successfully",
+      });
+    } catch (error) {
+      console.error("Failed to delete time entry:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Time entry not found",
+        message: "Failed to delete time entry",
       });
     }
-
-    await prisma.timeEntry.delete({
-      where: {
-        id,
-      },
-    });
-
-    return res.json({
-      success: true,
-      message: "Time entry deleted successfully",
-    });
-  } catch (error) {
-    console.error("Failed to delete time entry:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete time entry",
-    });
-  }
-});
+  },
+);
 
 export default router;

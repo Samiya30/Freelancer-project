@@ -33,6 +33,7 @@ import {
 } from "@/lib/api/clients";
 
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 type ClientStatus = "Active" | "Inactive";
 
@@ -113,6 +114,20 @@ function normalizeApiClient(
 
 export default function ClientsPage() {
   const { showToast } = useToast();
+
+  const { hasPermission } = useAuth();
+
+  const canCreate =
+    hasPermission("clients.create");
+
+  const canUpdate =
+    hasPermission("clients.update");
+
+  const canDelete =
+    hasPermission("clients.delete");
+
+  const canExport =
+    hasPermission("clients.export");
 
   const [search, setSearch] = useState("");
 
@@ -676,15 +691,17 @@ export default function ClientsPage() {
                 </div>
               </div>
 
-              <button
-                onClick={() =>
-                  setShowAddModal(true)
-                }
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-purple-700 shadow-lg transition hover:-translate-y-0.5 hover:bg-purple-50"
-              >
-                <Plus className="h-4 w-4" />
-                Add Client
-              </button>
+              {canCreate && (
+                <button
+                  onClick={() =>
+                    setShowAddModal(true)
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-purple-700 shadow-lg transition hover:-translate-y-0.5 hover:bg-purple-50"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Client
+                </button>
+              )}
 
             </div>
           </div>
@@ -845,14 +862,16 @@ export default function ClientsPage() {
 
                 </div>
 
-                <button
-                  onClick={exportCSV}
-                  disabled={apiLoading}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Download className="h-4 w-4" />
-                  Export
-                </button>
+                {canExport && (
+                  <button
+                    onClick={exportCSV}
+                    disabled={apiLoading}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export
+                  </button>
+                )}
 
               </div>
 
@@ -936,17 +955,17 @@ export default function ClientsPage() {
                         : "Add your first client to get started."}
                     </p>
 
-                    <button
-                      onClick={() =>
-                        setShowAddModal(
-                          true,
-                        )
-                      }
-                      className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add Client
-                    </button>
+                    {canCreate && (
+                      <button
+                        onClick={() =>
+                          setShowAddModal(true)
+                        }
+                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add Client
+                      </button>
+                    )}
 
                   </div>
                 ) : (
@@ -1026,18 +1045,41 @@ export default function ClientsPage() {
 
                             </div>
 
-                            <StatusSelect
-                              client={
-                                client
-                              }
-                              onChange={
-                                handleStatusChange
-                              }
-                            />
+                            <div>
+                              {canUpdate ? (
+                                <StatusSelect
+                                  client={
+                                    client
+                                  }
+                                  onChange={
+                                    handleStatusChange
+                                  }
+                                />
+                              ) : (
+                                <span
+                                  className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                                    client.status ===
+                                    "Active"
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-slate-200 bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {
+                                    client.status
+                                  }
+                                </span>
+                              )}
+                            </div>
 
                             <ClientMenu
                               client={
                                 client
+                              }
+                              canUpdate={
+                                canUpdate
+                              }
+                              canDelete={
+                                canDelete
                               }
                               open={
                                 openMenu ===
@@ -1102,6 +1144,12 @@ export default function ClientsPage() {
                               <ClientMenu
                                 client={
                                   client
+                                }
+                                canUpdate={
+                                  canUpdate
+                                }
+                                canDelete={
+                                  canDelete
                                 }
                                 open={
                                   openMenu ===
@@ -1182,14 +1230,29 @@ export default function ClientsPage() {
                                 )}
                               </div>
 
-                              <StatusSelect
-                                client={
-                                  client
-                                }
-                                onChange={
-                                  handleStatusChange
-                                }
-                              />
+                              {canUpdate ? (
+                                <StatusSelect
+                                  client={
+                                    client
+                                  }
+                                  onChange={
+                                    handleStatusChange
+                                  }
+                                />
+                              ) : (
+                                <span
+                                  className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                                    client.status ===
+                                    "Active"
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-slate-200 bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {
+                                    client.status
+                                  }
+                                </span>
+                              )}
 
                             </div>
 
@@ -1483,18 +1546,30 @@ function ClientMenu({
   onToggle,
   onEdit,
   onDelete,
+  canUpdate,
+  canDelete,
 }: {
   client: Client;
   open: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  canUpdate: boolean;
+  canDelete: boolean;
 }) {
+  const hasActions =
+    canUpdate || canDelete;
+
+  if (!hasActions) {
+    return null;
+  }
+
   return (
     <div className="relative flex shrink-0 justify-end">
 
       <button
         onClick={onToggle}
+        aria-label={`Actions for ${client.name}`}
         className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
       >
         <Ellipsis className="h-4 w-4" />
@@ -1503,13 +1578,15 @@ function ClientMenu({
       {open && (
         <div className="absolute right-0 top-10 z-30 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
 
-          <button
-            onClick={onEdit}
-            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700"
-          >
-            <Edit3 className="h-4 w-4" />
-            Edit Client
-          </button>
+          {canUpdate && (
+            <button
+              onClick={onEdit}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700"
+            >
+              <Edit3 className="h-4 w-4" />
+              Edit Client
+            </button>
+          )}
 
           <Link
             href={`/projects?client=${client.id}`}
@@ -1519,13 +1596,15 @@ function ClientMenu({
             View Projects
           </Link>
 
-          <button
-            onClick={onDelete}
-            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete Client
-          </button>
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete Client
+            </button>
+          )}
 
         </div>
       )}

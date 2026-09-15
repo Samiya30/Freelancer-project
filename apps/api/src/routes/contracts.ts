@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -76,347 +77,412 @@ async function validateClient(
 
 /**
  * GET /api/contracts
+ *
+ * Requires:
+ * - Authentication
+ * - contracts.view permission
+ *
+ * Ownership:
+ * - Only returns contracts belonging to the authenticated user.
  */
-router.get("/", async (req, res) => {
-  try {
-    const userId = getUserId(req);
+router.get(
+  "/",
+  requirePermission("contracts.view"),
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
 
-    const contracts = await prisma.contract.findMany({
-      where: {
-        userId,
-      },
-      include: {
-        clientRecord: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+      const contracts = await prisma.contract.findMany({
+        where: {
+          userId,
+        },
+        include: {
+          clientRecord: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
 
-    return res.status(200).json({
-      success: true,
-      data: contracts,
-    });
-  } catch (error) {
-    console.error("GET /api/contracts error:", error);
+      return res.status(200).json({
+        success: true,
+        data: contracts,
+      });
+    } catch (error) {
+      console.error("GET /api/contracts error:", error);
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch contracts",
-    });
-  }
-});
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch contracts",
+      });
+    }
+  },
+);
 
 /**
  * GET /api/contracts/:id
+ *
+ * Requires:
+ * - Authentication
+ * - contracts.view permission
+ *
+ * Ownership:
+ * - Contract must belong to the authenticated user.
  */
-router.get("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.get(
+  "/:id",
+  requirePermission("contracts.view"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid contract ID",
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const contract = await prisma.contract.findFirst({
+        where: {
+          id,
+          userId,
+        },
+        include: {
+          clientRecord: true,
+        },
+      });
+
+      if (!contract) {
+        return res.status(404).json({
+          success: false,
+          message: "Contract not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: contract,
+      });
+    } catch (error) {
+      console.error("GET /api/contracts/:id error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid contract ID",
+        message: "Failed to fetch contract",
       });
     }
-
-    const userId = getUserId(req);
-
-    const contract = await prisma.contract.findFirst({
-      where: {
-        id,
-        userId,
-      },
-      include: {
-        clientRecord: true,
-      },
-    });
-
-    if (!contract) {
-      return res.status(404).json({
-        success: false,
-        message: "Contract not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: contract,
-    });
-  } catch (error) {
-    console.error("GET /api/contracts/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch contract",
-    });
-  }
-});
+  },
+);
 
 /**
  * POST /api/contracts
+ *
+ * Requires:
+ * - Authentication
+ * - contracts.create permission
+ *
+ * Ownership:
+ * - Contract is assigned to authenticated user.
+ * - clientId must belong to authenticated user.
  */
-router.post("/", async (req, res) => {
-  try {
-    const parsed = createContractSchema.safeParse(req.body);
+router.post(
+  "/",
+  requirePermission("contracts.create"),
+  async (req, res) => {
+    try {
+      const parsed = createContractSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid contract data",
-        errors: parsed.error.flatten(),
-      });
-    }
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid contract data",
+          errors: parsed.error.flatten(),
+        });
+      }
 
-    const userId = getUserId(req);
+      const userId = getUserId(req);
 
-    const client = await validateClient(userId, parsed.data.clientId);
-
-    if (parsed.data.clientId !== undefined && !client) {
-      return res.status(400).json({
-        success: false,
-        message: "Client not found",
-      });
-    }
-
-    const startDate = parsed.data.startDate
-      ? new Date(parsed.data.startDate)
-      : new Date();
-
-    const endDate = parsed.data.endDate
-      ? new Date(parsed.data.endDate)
-      : new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    if (endDate < startDate) {
-      return res.status(400).json({
-        success: false,
-        message: "End date cannot be before start date",
-      });
-    }
-
-    const contract = await prisma.contract.create({
-      data: {
+      const client = await validateClient(
         userId,
-        number: parsed.data.number,
-        title: parsed.data.title,
-        client: parsed.data.client,
-        clientEmail: parsed.data.clientEmail,
-        project: parsed.data.project,
-        value: parsed.data.value,
-        status: parsed.data.status ?? "Draft",
-        startDate,
-        endDate,
-        description: parsed.data.description ?? "",
-        clientId: client?.id ?? null,
-      },
-      include: {
-        clientRecord: true,
-      },
-    });
+        parsed.data.clientId,
+      );
 
-    return res.status(201).json({
-      success: true,
-      message: "Contract created successfully",
-      data: contract,
-    });
-  } catch (error) {
-    console.error("POST /api/contracts error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create contract",
-    });
-  }
-});
-
-/**
- * PATCH /api/contracts/:id
- */
-router.patch("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid contract ID",
-      });
-    }
-
-    const parsed = updateContractSchema.safeParse(req.body);
-
-    if (!parsed.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid contract data",
-        errors: parsed.error.flatten(),
-      });
-    }
-
-    const userId = getUserId(req);
-
-    const existingContract = await prisma.contract.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingContract) {
-      return res.status(404).json({
-        success: false,
-        message: "Contract not found",
-      });
-    }
-
-    if (parsed.data.clientId !== undefined) {
-      const client = await validateClient(userId, parsed.data.clientId);
-
-      if (parsed.data.clientId !== null && !client) {
+      if (parsed.data.clientId !== undefined && !client) {
         return res.status(400).json({
           success: false,
           message: "Client not found",
         });
       }
-    }
 
-    const startDate =
-      parsed.data.startDate !== undefined
+      const startDate = parsed.data.startDate
         ? new Date(parsed.data.startDate)
-        : existingContract.startDate;
+        : new Date();
 
-    const endDate =
-      parsed.data.endDate !== undefined
+      const endDate = parsed.data.endDate
         ? new Date(parsed.data.endDate)
-        : existingContract.endDate;
+        : new Date(
+            startDate.getTime() + 30 * 24 * 60 * 60 * 1000,
+          );
 
-    if (endDate < startDate) {
-      return res.status(400).json({
+      if (endDate < startDate) {
+        return res.status(400).json({
+          success: false,
+          message: "End date cannot be before start date",
+        });
+      }
+
+      const contract = await prisma.contract.create({
+        data: {
+          userId,
+          number: parsed.data.number,
+          title: parsed.data.title,
+          client: parsed.data.client,
+          clientEmail: parsed.data.clientEmail,
+          project: parsed.data.project,
+          value: parsed.data.value,
+          status: parsed.data.status ?? "Draft",
+          startDate,
+          endDate,
+          description: parsed.data.description ?? "",
+          clientId: client?.id ?? null,
+        },
+        include: {
+          clientRecord: true,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Contract created successfully",
+        data: contract,
+      });
+    } catch (error) {
+      console.error("POST /api/contracts error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "End date cannot be before start date",
+        message: "Failed to create contract",
       });
     }
+  },
+);
 
-    const updateData: Record<string, unknown> = {};
+/**
+ * PATCH /api/contracts/:id
+ *
+ * Requires:
+ * - Authentication
+ * - contracts.update permission
+ *
+ * Ownership:
+ * - Existing contract must belong to authenticated user.
+ * - New clientId must belong to authenticated user.
+ */
+router.patch(
+  "/:id",
+  requirePermission("contracts.update"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (parsed.data.number !== undefined) {
-      updateData.number = parsed.data.number;
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid contract ID",
+        });
+      }
+
+      const parsed = updateContractSchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid contract data",
+          errors: parsed.error.flatten(),
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const existingContract = await prisma.contract.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingContract) {
+        return res.status(404).json({
+          success: false,
+          message: "Contract not found",
+        });
+      }
+
+      if (parsed.data.clientId !== undefined) {
+        const client = await validateClient(
+          userId,
+          parsed.data.clientId,
+        );
+
+        if (parsed.data.clientId !== null && !client) {
+          return res.status(400).json({
+            success: false,
+            message: "Client not found",
+          });
+        }
+      }
+
+      const startDate =
+        parsed.data.startDate !== undefined
+          ? new Date(parsed.data.startDate)
+          : existingContract.startDate;
+
+      const endDate =
+        parsed.data.endDate !== undefined
+          ? new Date(parsed.data.endDate)
+          : existingContract.endDate;
+
+      if (endDate < startDate) {
+        return res.status(400).json({
+          success: false,
+          message: "End date cannot be before start date",
+        });
+      }
+
+      const updateData: Record<string, unknown> = {};
+
+      if (parsed.data.number !== undefined) {
+        updateData.number = parsed.data.number;
+      }
+
+      if (parsed.data.title !== undefined) {
+        updateData.title = parsed.data.title;
+      }
+
+      if (parsed.data.client !== undefined) {
+        updateData.client = parsed.data.client;
+      }
+
+      if (parsed.data.clientEmail !== undefined) {
+        updateData.clientEmail = parsed.data.clientEmail;
+      }
+
+      if (parsed.data.project !== undefined) {
+        updateData.project = parsed.data.project;
+      }
+
+      if (parsed.data.value !== undefined) {
+        updateData.value = parsed.data.value;
+      }
+
+      if (parsed.data.status !== undefined) {
+        updateData.status = parsed.data.status;
+      }
+
+      if (parsed.data.startDate !== undefined) {
+        updateData.startDate = startDate;
+      }
+
+      if (parsed.data.endDate !== undefined) {
+        updateData.endDate = endDate;
+      }
+
+      if (parsed.data.description !== undefined) {
+        updateData.description = parsed.data.description;
+      }
+
+      if (parsed.data.clientId !== undefined) {
+        updateData.clientId = parsed.data.clientId;
+      }
+
+      const contract = await prisma.contract.update({
+        where: {
+          id: existingContract.id,
+        },
+        data: updateData,
+        include: {
+          clientRecord: true,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Contract updated successfully",
+        data: contract,
+      });
+    } catch (error) {
+      console.error("PATCH /api/contracts/:id error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update contract",
+      });
     }
-
-    if (parsed.data.title !== undefined) {
-      updateData.title = parsed.data.title;
-    }
-
-    if (parsed.data.client !== undefined) {
-      updateData.client = parsed.data.client;
-    }
-
-    if (parsed.data.clientEmail !== undefined) {
-      updateData.clientEmail = parsed.data.clientEmail;
-    }
-
-    if (parsed.data.project !== undefined) {
-      updateData.project = parsed.data.project;
-    }
-
-    if (parsed.data.value !== undefined) {
-      updateData.value = parsed.data.value;
-    }
-
-    if (parsed.data.status !== undefined) {
-      updateData.status = parsed.data.status;
-    }
-
-    if (parsed.data.startDate !== undefined) {
-      updateData.startDate = startDate;
-    }
-
-    if (parsed.data.endDate !== undefined) {
-      updateData.endDate = endDate;
-    }
-
-    if (parsed.data.description !== undefined) {
-      updateData.description = parsed.data.description;
-    }
-
-    if (parsed.data.clientId !== undefined) {
-      updateData.clientId = parsed.data.clientId;
-    }
-
-    const contract = await prisma.contract.update({
-      where: {
-        id,
-      },
-      data: updateData,
-      include: {
-        clientRecord: true,
-      },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Contract updated successfully",
-      data: contract,
-    });
-  } catch (error) {
-    console.error("PATCH /api/contracts/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update contract",
-    });
-  }
-});
+  },
+);
 
 /**
  * DELETE /api/contracts/:id
+ *
+ * Requires:
+ * - Authentication
+ * - contracts.delete permission
+ *
+ * Ownership:
+ * - Contract must belong to authenticated user.
  */
-router.delete("/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.delete(
+  "/:id",
+  requirePermission("contracts.delete"),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
 
-    if (!Number.isInteger(id) || id <= 0) {
-      return res.status(400).json({
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid contract ID",
+        });
+      }
+
+      const userId = getUserId(req);
+
+      const existingContract = await prisma.contract.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
+
+      if (!existingContract) {
+        return res.status(404).json({
+          success: false,
+          message: "Contract not found",
+        });
+      }
+
+      await prisma.contract.delete({
+        where: {
+          id: existingContract.id,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Contract deleted successfully",
+      });
+    } catch (error) {
+      console.error("DELETE /api/contracts/:id error:", error);
+
+      return res.status(500).json({
         success: false,
-        message: "Invalid contract ID",
+        message: "Failed to delete contract",
       });
     }
-
-    const userId = getUserId(req);
-
-    const existingContract = await prisma.contract.findFirst({
-      where: {
-        id,
-        userId,
-      },
-    });
-
-    if (!existingContract) {
-      return res.status(404).json({
-        success: false,
-        message: "Contract not found",
-      });
-    }
-
-    await prisma.contract.delete({
-      where: {
-        id,
-      },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Contract deleted successfully",
-    });
-  } catch (error) {
-    console.error("DELETE /api/contracts/:id error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete contract",
-    });
-  }
-});
+  },
+);
 
 export default router;

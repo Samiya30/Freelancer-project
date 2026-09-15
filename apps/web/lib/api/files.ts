@@ -53,152 +53,77 @@ export interface UploadFileInput {
   projectId?: number | null;
 }
 
-export type UpdateFileInput =
-  Partial<CreateFileInput>;
+export type UpdateFileInput = Partial<CreateFileInput>;
 
 export async function getFiles() {
   return api.get<ApiFile[]>("/api/files");
 }
 
 export async function getFile(id: number) {
-  return api.get<ApiFile>(
-    `/api/files/${id}`
-  );
+  return api.get<ApiFile>(`/api/files/${id}`);
 }
 
 /**
  * Upload the actual binary file.
  *
- * Do NOT use api.post() here because the normal
- * HTTP helper forces Content-Type: application/json.
- *
- * The browser must set multipart/form-data itself
- * so that the boundary is generated correctly.
+ * FormData is passed through the shared HTTP helper.
+ * The helper intentionally does not set Content-Type for
+ * FormData so the browser can generate the multipart boundary.
  */
-export async function uploadFile(
-  data: UploadFileInput
-) {
+export async function uploadFile(data: UploadFileInput) {
   const formData = new FormData();
 
   formData.append("file", data.file);
   formData.append("folder", data.folder);
-  formData.append(
-    "shared",
-    String(data.shared ?? false)
-  );
+  formData.append("shared", String(data.shared ?? false));
 
   if (data.client !== undefined) {
-    formData.append(
-      "client",
-      data.client ?? ""
-    );
+    formData.append("client", data.client ?? "");
   }
 
   if (data.project !== undefined) {
-    formData.append(
-      "project",
-      data.project ?? ""
-    );
+    formData.append("project", data.project ?? "");
   }
 
   if (data.clientId !== undefined) {
     formData.append(
       "clientId",
-      data.clientId === null
-        ? ""
-        : String(data.clientId)
+      data.clientId === null ? "" : String(data.clientId),
     );
   }
 
   if (data.projectId !== undefined) {
     formData.append(
       "projectId",
-      data.projectId === null
-        ? ""
-        : String(data.projectId)
+      data.projectId === null ? "" : String(data.projectId),
     );
   }
 
-  const response = await fetch(
-    `${API_URL}/api/files/upload`,
-    {
-      method: "POST",
-      body: formData,
-      credentials: "include",
-    }
-  );
-
-  let body: {
-    success: boolean;
-    message?: string;
-    data?: ApiFile;
-    errors?: unknown;
-  };
-
-  try {
-    body = await response.json();
-  } catch {
-    throw new Error(
-      `API returned an invalid response (${response.status})`
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      body.message ||
-        `Upload failed with status ${response.status}`
-    );
-  }
-
-  if (!body.data) {
-    throw new Error(
-      "Upload succeeded but no file was returned."
-    );
-  }
-
-  return {
-    success: body.success,
-    message: body.message,
-    data: body.data,
-  };
+  return api.post<ApiFile>("/api/files/upload", formData);
 }
 
-export async function createFile(
-  data: CreateFileInput
-) {
-  return api.post<ApiFile>(
-    "/api/files",
-    data
-  );
+export async function createFile(data: CreateFileInput) {
+  return api.post<ApiFile>("/api/files", data);
 }
 
 export async function updateFile(
   id: number,
-  data: UpdateFileInput
+  data: UpdateFileInput,
 ) {
-  return api.patch<ApiFile>(
-    `/api/files/${id}`,
-    data
-  );
+  return api.patch<ApiFile>(`/api/files/${id}`, data);
 }
 
-export async function deleteFile(
-  id: number
-) {
-  return api.delete(
-    `/api/files/${id}`
-  );
+export async function deleteFile(id: number) {
+  return api.delete(`/api/files/${id}`);
 }
 
 /**
  * Duplicate the actual stored file.
  */
-export async function duplicateFile(
-  id: number
-) {
+export async function duplicateFile(id: number) {
   return api.post<ApiFile>(
     `/api/files/${id}/duplicate`,
-    {}
+    {},
   );
 }
 
@@ -207,14 +132,14 @@ export async function duplicateFile(
  */
 export async function downloadFile(
   id: number,
-  filename: string
+  filename: string,
 ) {
   const response = await fetch(
     `${API_URL}/api/files/${id}/download`,
     {
       method: "GET",
       credentials: "include",
-    }
+    },
   );
 
   if (!response.ok) {
@@ -249,7 +174,5 @@ export async function downloadFile(
   anchor.click();
   anchor.remove();
 
-  window.URL.revokeObjectURL(
-    objectUrl
-  );
+  window.URL.revokeObjectURL(objectUrl);
 }
