@@ -25,21 +25,51 @@ const app = express();
 
 const PORT = Number(process.env.PORT) || 4000;
 
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  "http://localhost:3000";
+
+/*
+ * Security headers
+ */
 app.use(helmet());
 
+/*
+ * CORS
+ *
+ * The frontend origin is configurable so the same
+ * API can be used in development and production.
+ */
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: FRONTEND_URL,
     credentials: true,
-  })
+  }),
 );
 
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
+/*
+ * Request body parsing
+ */
+app.use(
+  express.json({
+    limit: "2mb",
+  }),
+);
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "2mb",
+  }),
+);
+
 app.use(cookieParser());
 
 /*
  * Health check
+ *
+ * Intentionally public so deployment/infrastructure
+ * services can verify that the API is running.
  */
 app.get("/health", (_req, res) => {
   res.status(200).json({
@@ -51,6 +81,8 @@ app.get("/health", (_req, res) => {
 
 /*
  * API information
+ *
+ * Intentionally public.
  */
 app.get("/api", (_req, res) => {
   res.json({
@@ -61,7 +93,10 @@ app.get("/api", (_req, res) => {
 });
 
 /*
- * Client routes
+ * API routes
+ *
+ * Individual routers are responsible for
+ * authentication and permission enforcement.
  */
 app.use("/api/clients", clientsRouter);
 app.use("/api/leads", leadsRouter);
@@ -91,14 +126,17 @@ app.use((_req, res) => {
 });
 
 /*
- * Error handler
+ * Global error handler
+ *
+ * Detailed errors are logged server-side but are
+ * not exposed to clients.
  */
 app.use(
   (
     error: unknown,
     _req: express.Request,
     res: express.Response,
-    _next: express.NextFunction
+    _next: express.NextFunction,
   ) => {
     console.error(error);
 
@@ -106,7 +144,7 @@ app.use(
       success: false,
       message: "Internal server error",
     });
-  }
+  },
 );
 
 /*
@@ -114,6 +152,6 @@ app.use(
  */
 app.listen(PORT, () => {
   console.log(
-    `FreelanceOS API running on http://localhost:${PORT}`
+    `FreelanceOS API running on http://localhost:${PORT}`,
   );
 });

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 import {
   getReports,
   type ReportsData,
@@ -38,6 +39,9 @@ function formatCurrency(value: number) {
 
 export default function ReportsPage() {
   const { showToast } = useToast();
+  const { hasPermission } = useAuth();
+
+  const canExport = hasPermission("reports.export");
 
   const [year, setYear] = useState("2026");
   const [activeTab, setActiveTab] =
@@ -57,21 +61,26 @@ export default function ReportsPage() {
       try {
         setLoading(true);
 
-        const response = await getReports(selectedYear);
+        const response =
+          await getReports(selectedYear);
 
         if (cancelled) {
           return;
         }
 
-        if (!response.data) {
+        if (!response.success || !response.data) {
           throw new Error(
-            "Reports loaded but no report data was returned."
+            response.message ||
+              "Reports loaded but no report data was returned."
           );
         }
 
         setReportData(response.data);
       } catch (error) {
-        console.error("Failed to load reports:", error);
+        console.error(
+          "Failed to load reports:",
+          error
+        );
 
         if (!cancelled) {
           showToast(
@@ -133,45 +142,56 @@ export default function ReportsPage() {
 
   const totalRevenue = yearPayments
     .filter(
-      (payment) => payment.status === "Completed"
+      (payment) =>
+        payment.status === "Completed"
     )
     .reduce(
-      (sum, payment) => sum + payment.amount,
+      (sum, payment) =>
+        sum + payment.amount,
       0
     );
 
   const totalExpenses = yearExpenses.reduce(
-    (sum, expense) => sum + expense.amount,
+    (sum, expense) =>
+      sum + expense.amount,
     0
   );
 
-  const netProfit = totalRevenue - totalExpenses;
+  const netProfit =
+    totalRevenue - totalExpenses;
 
   const averageMonthlyRevenue =
     totalRevenue / 12;
 
   const pendingPayments = yearPayments
     .filter(
-      (payment) => payment.status === "Pending"
+      (payment) =>
+        payment.status === "Pending"
     )
     .reduce(
-      (sum, payment) => sum + payment.amount,
+      (sum, payment) =>
+        sum + payment.amount,
       0
     );
 
-  const overdueInvoices = yearInvoices.filter(
-    (invoice) => invoice.status === "Overdue"
-  );
+  const overdueInvoices =
+    yearInvoices.filter(
+      (invoice) =>
+        invoice.status === "Overdue"
+    );
 
-  const paidInvoices = yearInvoices.filter(
-    (invoice) => invoice.status === "Paid"
-  );
+  const paidInvoices =
+    yearInvoices.filter(
+      (invoice) =>
+        invoice.status === "Paid"
+    );
 
-  const acceptedProjects = projects.filter(
-    (project) =>
-      project.status === "Completed" ||
-      project.status === "In Progress"
-  );
+  const acceptedProjects =
+    projects.filter(
+      (project) =>
+        project.status === "Completed" ||
+        project.status === "In Progress"
+    );
 
   const profitMargin =
     totalRevenue > 0
@@ -184,9 +204,11 @@ export default function ReportsPage() {
       const revenue = yearPayments
         .filter(
           (payment) =>
-            payment.status === "Completed" &&
-            new Date(payment.date).getMonth() ===
-              month
+            payment.status ===
+              "Completed" &&
+            new Date(
+              payment.date
+            ).getMonth() === month
         )
         .reduce(
           (sum, payment) =>
@@ -197,8 +219,9 @@ export default function ReportsPage() {
       const expense = yearExpenses
         .filter(
           (item) =>
-            new Date(item.date).getMonth() ===
-            month
+            new Date(
+              item.date
+            ).getMonth() === month
         )
         .reduce(
           (sum, item) =>
@@ -221,50 +244,58 @@ export default function ReportsPage() {
   );
 
   const maxChartValue = Math.max(
-    ...revenueByMonth.flatMap((item) => [
-      item.revenue,
-      item.expense,
-    ]),
-    1
-  );
-
-  const expenseByCategory = Array.from(
-    new Set(
-      yearExpenses.map(
-        (expense) => expense.category
-      )
-    )
-  )
-    .map((category) => ({
-      category,
-      amount: yearExpenses
-        .filter(
-          (expense) =>
-            expense.category === category
-        )
-        .reduce(
-          (sum, expense) =>
-            sum + expense.amount,
-          0
-        ),
-    }))
-    .sort(
-      (a, b) => b.amount - a.amount
-    );
-
-  const maxExpenseCategory = Math.max(
-    ...expenseByCategory.map(
-      (item) => item.amount
+    ...revenueByMonth.flatMap(
+      (item) => [
+        item.revenue,
+        item.expense,
+      ]
     ),
     1
   );
 
-  const projectPerformance = projects.map(
-    (project) => {
+  const expenseByCategory =
+    Array.from(
+      new Set(
+        yearExpenses.map(
+          (expense) =>
+            expense.category
+        )
+      )
+    )
+      .map((category) => ({
+        category,
+        amount: yearExpenses
+          .filter(
+            (expense) =>
+              expense.category ===
+              category
+          )
+          .reduce(
+            (sum, expense) =>
+              sum + expense.amount,
+            0
+          ),
+      }))
+      .sort(
+        (a, b) =>
+          b.amount - a.amount
+      );
+
+  const maxExpenseCategory =
+    Math.max(
+      ...expenseByCategory.map(
+        (item) => item.amount
+      ),
+      1
+    );
+
+  const projectPerformance =
+    projects.map((project) => {
       const projectInvoices =
         yearInvoices.filter(
           (invoice) =>
-            invoice.project === project.name
+            invoice.project ===
+            project.name
         );
 
       const projectPayments =
@@ -309,16 +340,24 @@ export default function ReportsPage() {
           projectPayments -
           projectExpenses,
       };
-    }
-  );
+    });
 
   const handleExport = () => {
+    if (!canExport) {
+      showToast(
+        "You do not have permission to export reports.",
+        "error"
+      );
+      return;
+    }
+
     const rows = revenueByMonth.map(
       (item) => [
         item.month,
         item.revenue,
         item.expense,
-        item.revenue - item.expense,
+        item.revenue -
+          item.expense,
       ]
     );
 
@@ -379,7 +418,6 @@ export default function ReportsPage() {
   return (
     <AppShell>
       <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-violet-50/30">
-        {/* Header */}
         <div className="border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
           <div className="mx-auto max-w-[1700px] px-4 py-5 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -417,13 +455,15 @@ export default function ReportsPage() {
                   </option>
                 </select>
 
-                <button
-                  onClick={handleExport}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:shadow-xl"
-                >
-                  <Download className="h-4 w-4" />
-                  Export Report
-                </button>
+                {canExport && (
+                  <button
+                    onClick={handleExport}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export Report
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -434,7 +474,6 @@ export default function ReportsPage() {
             <ReportsLoading />
           ) : (
             <>
-              {/* Hero */}
               <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-violet-950 to-fuchsia-900 p-6 text-white shadow-xl sm:p-8">
                 <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
                   <div className="max-w-2xl">
@@ -513,7 +552,6 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              {/* Tabs */}
               <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
                 <div className="flex min-w-max gap-1">
                   {tabs.map((tab) => (
@@ -534,7 +572,6 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              {/* Overview */}
               {activeTab === "Overview" && (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -672,7 +709,6 @@ export default function ReportsPage() {
                 </>
               )}
 
-              {/* Financial */}
               {activeTab === "Financial" && (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -722,12 +758,13 @@ export default function ReportsPage() {
 
                   <ExpenseBreakdown
                     data={expenseByCategory}
-                    maxValue={maxExpenseCategory}
+                    maxValue={
+                      maxExpenseCategory
+                    }
                   />
                 </>
               )}
 
-              {/* Projects */}
               {activeTab === "Projects" && (
                 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                   <div className="border-b border-slate-100 bg-gradient-to-r from-blue-50 via-white to-violet-50 px-5 py-5">
@@ -949,7 +986,6 @@ export default function ReportsPage() {
                 </div>
               )}
 
-              {/* Invoices */}
               {activeTab === "Invoices" && (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1094,7 +1130,6 @@ export default function ReportsPage() {
                 </>
               )}
 
-              {/* Insights */}
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="rounded-xl bg-gradient-to-br from-violet-100 to-fuchsia-100 p-2.5 text-violet-600">

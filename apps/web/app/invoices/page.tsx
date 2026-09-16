@@ -13,6 +13,7 @@ import {
 import { getClients, ApiClient } from "@/lib/api/clients";
 import { getProjects, ApiProject } from "@/lib/api/projects";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 import {
   Plus,
   Search,
@@ -121,6 +122,12 @@ function formatDate(value: string) {
 
 export default function InvoicesPage() {
   const { showToast } = useToast();
+  const { hasPermission } = useAuth();
+
+  const canCreate = hasPermission("invoices.create");
+  const canUpdate = hasPermission("invoices.update");
+  const canDelete = hasPermission("invoices.delete");
+  const canExport = hasPermission("invoices.export");
 
   const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
   const [clients, setClients] = useState<ApiClient[]>([]);
@@ -361,6 +368,14 @@ export default function InvoicesPage() {
   };
 
   const handleAddInvoice = async () => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create invoices.",
+        "error"
+      );
+      return;
+    }
+
     if (
       !newInvoice.client ||
       !newInvoice.clientEmail ||
@@ -430,12 +445,17 @@ export default function InvoicesPage() {
         })),
       });
 
-      if (response.data) {
-        setInvoices((current) => [
-          response.data!,
-          ...current,
-        ]);
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to create invoice."
+        );
       }
+
+      setInvoices((current) => [
+        response.data!,
+        ...current,
+      ]);
 
       resetInvoiceForm();
       setAddOpen(false);
@@ -462,6 +482,14 @@ export default function InvoicesPage() {
     invoice: ApiInvoice,
     status: InvoiceStatus
   ) => {
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update invoices.",
+        "error"
+      );
+      return;
+    }
+
     if (invoice.status === status) return;
 
     try {
@@ -469,15 +497,20 @@ export default function InvoicesPage() {
         status,
       });
 
-      if (response.data) {
-        setInvoices((current) =>
-          current.map((item) =>
-            item.id === invoice.id
-              ? response.data!
-              : item
-          )
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to update invoice."
         );
       }
+
+      setInvoices((current) =>
+        current.map((item) =>
+          item.id === invoice.id
+            ? response.data!
+            : item
+        )
+      );
 
       showToast(
         `${invoice.number} updated to ${status}.`,
@@ -501,6 +534,14 @@ export default function InvoicesPage() {
   const handleMarkPaid = async (
     invoice: ApiInvoice
   ) => {
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update invoices.",
+        "error"
+      );
+      return;
+    }
+
     try {
       const response = await updateInvoice(
         invoice.id,
@@ -509,15 +550,20 @@ export default function InvoicesPage() {
         }
       );
 
-      if (response.data) {
-        setInvoices((current) =>
-          current.map((item) =>
-            item.id === invoice.id
-              ? response.data!
-              : item
-          )
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to update invoice."
         );
       }
+
+      setInvoices((current) =>
+        current.map((item) =>
+          item.id === invoice.id
+            ? response.data!
+            : item
+        )
+      );
 
       setMenuId(null);
 
@@ -543,6 +589,14 @@ export default function InvoicesPage() {
   const handleDuplicate = async (
     invoice: ApiInvoice
   ) => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create invoices.",
+        "error"
+      );
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -567,12 +621,17 @@ export default function InvoicesPage() {
         })),
       });
 
-      if (response.data) {
-        setInvoices((current) => [
-          response.data!,
-          ...current,
-        ]);
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to duplicate invoice."
+        );
       }
+
+      setInvoices((current) => [
+        response.data!,
+        ...current,
+      ]);
 
       setMenuId(null);
 
@@ -598,12 +657,27 @@ export default function InvoicesPage() {
   };
 
   const handleDelete = async () => {
+    if (!canDelete) {
+      showToast(
+        "You do not have permission to delete invoices.",
+        "error"
+      );
+      return;
+    }
+
     if (deleteId === null) return;
 
     try {
       setSaving(true);
 
-      await deleteInvoice(deleteId);
+      const response = await deleteInvoice(deleteId);
+
+      if (!response.success) {
+        throw new Error(
+          response.message ||
+            "Failed to delete invoice."
+        );
+      }
 
       setInvoices((current) =>
         current.filter(
@@ -636,6 +710,14 @@ export default function InvoicesPage() {
   };
 
   const handleExport = () => {
+    if (!canExport) {
+      showToast(
+        "You do not have permission to export invoices.",
+        "error"
+      );
+      return;
+    }
+
     const headers = [
       "Invoice",
       "Client",
@@ -688,7 +770,6 @@ export default function InvoicesPage() {
   return (
     <AppShell>
       <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-violet-50/30">
-        {/* Header */}
         <div className="border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
           <div className="mx-auto max-w-[1700px] px-4 py-5 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -708,21 +789,25 @@ export default function InvoicesPage() {
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  onClick={handleExport}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                >
-                  <Download className="h-4 w-4" />
-                  Export
-                </button>
+                {canExport && (
+                  <button
+                    onClick={handleExport}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export
+                  </button>
+                )}
 
-                <button
-                  onClick={() => setAddOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:shadow-xl"
-                >
-                  <Plus className="h-4 w-4" />
-                  New Invoice
-                </button>
+                {canCreate && (
+                  <button
+                    onClick={() => setAddOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New Invoice
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -740,7 +825,6 @@ export default function InvoicesPage() {
             </div>
           )}
 
-          {/* Stats */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
               <div className="flex items-start justify-between">
@@ -748,11 +832,9 @@ export default function InvoicesPage() {
                   <p className="text-sm font-medium text-violet-700">
                     Total Invoiced
                   </p>
-
                   <p className="mt-2 text-3xl font-bold text-violet-950">
                     {formatCurrency(totalAmount)}
                   </p>
-
                   <p className="mt-1 text-xs text-violet-600">
                     {invoices.length} invoices
                   </p>
@@ -770,11 +852,9 @@ export default function InvoicesPage() {
                   <p className="text-sm font-medium text-emerald-700">
                     Paid
                   </p>
-
                   <p className="mt-2 text-3xl font-bold text-emerald-950">
                     {formatCurrency(paidAmount)}
                   </p>
-
                   <p className="mt-1 text-xs text-emerald-600">
                     Successfully collected
                   </p>
@@ -792,11 +872,9 @@ export default function InvoicesPage() {
                   <p className="text-sm font-medium text-blue-700">
                     Pending
                   </p>
-
                   <p className="mt-2 text-3xl font-bold text-blue-950">
                     {formatCurrency(pendingAmount)}
                   </p>
-
                   <p className="mt-1 text-xs text-blue-600">
                     Sent or viewed
                   </p>
@@ -814,11 +892,9 @@ export default function InvoicesPage() {
                   <p className="text-sm font-medium text-rose-700">
                     Overdue
                   </p>
-
                   <p className="mt-2 text-3xl font-bold text-rose-950">
                     {formatCurrency(overdueAmount)}
                   </p>
-
                   <p className="mt-1 text-xs text-rose-600">
                     Requires follow-up
                   </p>
@@ -831,7 +907,6 @@ export default function InvoicesPage() {
             </div>
           </div>
 
-          {/* Search */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row">
               <div className="relative flex-1">
@@ -839,9 +914,7 @@ export default function InvoicesPage() {
 
                 <input
                   value={search}
-                  onChange={(e) =>
-                    setSearch(e.target.value)
-                  }
+                  onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search invoices, clients or projects..."
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-100"
                 />
@@ -851,16 +924,12 @@ export default function InvoicesPage() {
                 value={statusFilter}
                 onChange={(e) =>
                   setStatusFilter(
-                    e.target.value as
-                      | "All"
-                      | InvoiceStatus
+                    e.target.value as "All" | InvoiceStatus
                   )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
               >
-                <option value="All">
-                  All Statuses
-                </option>
+                <option value="All">All Statuses</option>
 
                 {statusOptions.map((status) => (
                   <option key={status} value={status}>
@@ -871,7 +940,6 @@ export default function InvoicesPage() {
             </div>
           </div>
 
-          {/* Invoice Workspace */}
           <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 bg-gradient-to-r from-violet-50/70 via-white to-fuchsia-50/50 px-5 py-5">
               <div className="flex items-center justify-between">
@@ -891,7 +959,6 @@ export default function InvoicesPage() {
               </div>
             </div>
 
-            {/* Desktop */}
             <div className="hidden lg:block">
               {filteredInvoices.map((invoice) => (
                 <div
@@ -972,27 +1039,15 @@ export default function InvoicesPage() {
                           </p>
 
                           <p className="text-[10px] text-slate-400">
-                            Issued{" "}
-                            {formatDate(invoice.issueDate)}
+                            Issued {formatDate(invoice.issueDate)}
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        onClick={() =>
-                          showToast(
-                            "Invoice preview will be available next.",
-                            "info"
-                          )
-                        }
-                        className="rounded-xl p-2.5 text-slate-400 transition hover:bg-violet-100 hover:text-violet-600"
-                        title="View invoice"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-
+                    {(canUpdate ||
+                      canCreate ||
+                      canDelete) && (
                       <div className="relative">
                         <button
                           onClick={() =>
@@ -1009,43 +1064,48 @@ export default function InvoicesPage() {
 
                         {menuId === invoice.id && (
                           <div className="absolute right-0 top-11 z-30 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                            {invoice.status !== "Paid" && (
+                            {canUpdate &&
+                              invoice.status !== "Paid" && (
+                                <button
+                                  onClick={() =>
+                                    handleMarkPaid(invoice)
+                                  }
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  Mark as Paid
+                                </button>
+                              )}
+
+                            {canCreate && (
                               <button
                                 onClick={() =>
-                                  handleMarkPaid(invoice)
+                                  handleDuplicate(invoice)
                                 }
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
+                                disabled={saving}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                               >
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                Mark as Paid
+                                <Copy className="h-3.5 w-3.5" />
+                                Duplicate
                               </button>
                             )}
 
-                            <button
-                              onClick={() =>
-                                handleDuplicate(invoice)
-                              }
-                              disabled={saving}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              <Copy className="h-3.5 w-3.5" />
-                              Duplicate
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                setDeleteId(invoice.id);
-                                setMenuId(null);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Delete
-                            </button>
+                            {canDelete && (
+                              <button
+                                onClick={() => {
+                                  setDeleteId(invoice.id);
+                                  setMenuId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   <div className="ml-[74px] mt-4 flex items-center gap-4">
@@ -1067,31 +1127,33 @@ export default function InvoicesPage() {
                       </span>
                     </div>
 
-                    <div className="ml-auto flex items-center gap-2">
-                      <span className="text-[10px] font-semibold text-slate-400">
-                        Status
-                      </span>
+                    {canUpdate && (
+                      <div className="ml-auto flex items-center gap-2">
+                        <span className="text-[10px] font-semibold text-slate-400">
+                          Status
+                        </span>
 
-                      <select
-                        value={invoice.status}
-                        onChange={(e) =>
-                          handleStatusChange(
-                            invoice,
-                            e.target.value as InvoiceStatus
-                          )
-                        }
-                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 outline-none focus:border-violet-400"
-                      >
-                        {statusOptions.map((status) => (
-                          <option
-                            key={status}
-                            value={status}
-                          >
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                        <select
+                          value={invoice.status}
+                          onChange={(e) =>
+                            handleStatusChange(
+                              invoice,
+                              e.target.value as InvoiceStatus
+                            )
+                          }
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 outline-none focus:border-violet-400"
+                        >
+                          {statusOptions.map((status) => (
+                            <option
+                              key={status}
+                              value={status}
+                            >
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1113,13 +1175,9 @@ export default function InvoicesPage() {
               )}
             </div>
 
-            {/* Mobile */}
             <div className="divide-y divide-slate-100 lg:hidden">
               {filteredInvoices.map((invoice) => (
-                <div
-                  key={invoice.id}
-                  className="p-4"
-                >
+                <div key={invoice.id} className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-100 to-fuchsia-100 text-violet-700">
                       <Receipt className="h-5 w-5" />
@@ -1137,18 +1195,22 @@ export default function InvoicesPage() {
                           </h3>
                         </div>
 
-                        <button
-                          onClick={() =>
-                            setMenuId(
-                              menuId === invoice.id
-                                ? null
-                                : invoice.id
-                            )
-                          }
-                          className="rounded-lg p-1.5 text-slate-400"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
+                        {(canUpdate ||
+                          canCreate ||
+                          canDelete) && (
+                          <button
+                            onClick={() =>
+                              setMenuId(
+                                menuId === invoice.id
+                                  ? null
+                                  : invoice.id
+                              )
+                            }
+                            className="rounded-lg p-1.5 text-slate-400"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
 
                       <div className="mt-2 flex items-center gap-2">
@@ -1166,6 +1228,52 @@ export default function InvoicesPage() {
                       </div>
                     </div>
                   </div>
+
+                  {(canUpdate ||
+                    canCreate ||
+                    canDelete) &&
+                    menuId === invoice.id && (
+                      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                        {canUpdate &&
+                          invoice.status !== "Paid" && (
+                            <button
+                              onClick={() =>
+                                handleMarkPaid(invoice)
+                              }
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Mark as Paid
+                            </button>
+                          )}
+
+                        {canCreate && (
+                          <button
+                            onClick={() =>
+                              handleDuplicate(invoice)
+                            }
+                            disabled={saving}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            Duplicate
+                          </button>
+                        )}
+
+                        {canDelete && (
+                          <button
+                            onClick={() => {
+                              setDeleteId(invoice.id);
+                              setMenuId(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <div className="rounded-xl bg-violet-50 p-3">
@@ -1190,27 +1298,38 @@ export default function InvoicesPage() {
                   </div>
 
                   <div className="mt-3 flex items-center justify-between">
-                    <select
-                      value={invoice.status}
-                      onChange={(e) =>
-                        handleStatusChange(
-                          invoice,
-                          e.target.value as InvoiceStatus
-                        )
-                      }
-                      className={`rounded-full border px-3 py-1.5 text-xs font-bold outline-none ${getStatusStyle(
-                        invoice.status
-                      )}`}
-                    >
-                      {statusOptions.map((status) => (
-                        <option
-                          key={status}
-                          value={status}
-                        >
-                          {status}
-                        </option>
-                      ))}
-                    </select>
+                    {canUpdate ? (
+                      <select
+                        value={invoice.status}
+                        onChange={(e) =>
+                          handleStatusChange(
+                            invoice,
+                            e.target.value as InvoiceStatus
+                          )
+                        }
+                        className={`rounded-full border px-3 py-1.5 text-xs font-bold outline-none ${getStatusStyle(
+                          invoice.status
+                        )}`}
+                      >
+                        {statusOptions.map((status) => (
+                          <option
+                            key={status}
+                            value={status}
+                          >
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${getStatusStyle(
+                          invoice.status
+                        )}`}
+                      >
+                        {getStatusIcon(invoice.status)}
+                        {invoice.status}
+                      </span>
+                    )}
 
                     <button
                       onClick={() =>
@@ -1225,44 +1344,6 @@ export default function InvoicesPage() {
                       <ArrowRight className="h-3.5 w-3.5" />
                     </button>
                   </div>
-
-                  {menuId === invoice.id && (
-                    <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-                      {invoice.status !== "Paid" && (
-                        <button
-                          onClick={() =>
-                            handleMarkPaid(invoice)
-                          }
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-emerald-600 hover:bg-emerald-50"
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          Mark as Paid
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() =>
-                          handleDuplicate(invoice)
-                        }
-                        disabled={saving}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        Duplicate
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setDeleteId(invoice.id);
-                          setMenuId(null);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </button>
-                    </div>
-                  )}
                 </div>
               ))}
 
@@ -1278,7 +1359,6 @@ export default function InvoicesPage() {
             </div>
           </div>
 
-          {/* CTA */}
           <div className="rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 p-5 text-white shadow-lg">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
@@ -1309,8 +1389,7 @@ export default function InvoicesPage() {
           </div>
         </main>
 
-        {/* Add Invoice Modal */}
-        {addOpen && (
+        {addOpen && canCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
               <div className="bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 px-6 py-5 text-white">
@@ -1341,7 +1420,6 @@ export default function InvoicesPage() {
 
               <div className="max-h-[78vh] overflow-y-auto p-6">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {/* Client */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Client *
@@ -1353,9 +1431,7 @@ export default function InvoicesPage() {
                       <select
                         value={newInvoice.client}
                         onChange={(e) =>
-                          handleClientChange(
-                            e.target.value
-                          )
+                          handleClientChange(e.target.value)
                         }
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-9 pr-4 text-sm outline-none focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-100"
                       >
@@ -1375,7 +1451,6 @@ export default function InvoicesPage() {
                     </div>
                   </div>
 
-                  {/* Project */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Project *
@@ -1387,9 +1462,7 @@ export default function InvoicesPage() {
                       <select
                         value={newInvoice.project}
                         onChange={(e) =>
-                          handleProjectChange(
-                            e.target.value
-                          )
+                          handleProjectChange(e.target.value)
                         }
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-9 pr-4 text-sm outline-none focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-100"
                       >
@@ -1409,7 +1482,6 @@ export default function InvoicesPage() {
                     </div>
                   </div>
 
-                  {/* Email */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Client Email *
@@ -1429,7 +1501,6 @@ export default function InvoicesPage() {
                     />
                   </div>
 
-                  {/* Issue date */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Issue Date *
@@ -1448,7 +1519,6 @@ export default function InvoicesPage() {
                     />
                   </div>
 
-                  {/* Due date */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Due Date *
@@ -1467,7 +1537,6 @@ export default function InvoicesPage() {
                     />
                   </div>
 
-                  {/* Tax */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Tax %
@@ -1488,7 +1557,6 @@ export default function InvoicesPage() {
                     />
                   </div>
 
-                  {/* Discount */}
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Discount %
@@ -1509,7 +1577,6 @@ export default function InvoicesPage() {
                     />
                   </div>
 
-                  {/* Description */}
                   <div className="sm:col-span-2">
                     <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Description
@@ -1530,7 +1597,6 @@ export default function InvoicesPage() {
                   </div>
                 </div>
 
-                {/* Items */}
                 <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200">
                   <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
                     <div>
@@ -1553,114 +1619,101 @@ export default function InvoicesPage() {
                   </div>
 
                   <div className="divide-y divide-slate-100">
-                    {newInvoice.items.map(
-                      (item, index) => (
-                        <div
-                          key={item.id}
-                          className="grid gap-3 p-4 sm:grid-cols-[1fr_100px_140px_40px]"
-                        >
-                          <div>
-                            <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">
-                              Description
-                            </label>
+                    {newInvoice.items.map((item, index) => (
+                      <div
+                        key={item.id}
+                        className="grid gap-3 p-4 sm:grid-cols-[1fr_100px_140px_40px]"
+                      >
+                        <div>
+                          <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">
+                            Description
+                          </label>
 
-                            <input
-                              value={item.description}
-                              onChange={(e) =>
-                                updateItem(
-                                  item.id,
-                                  "description",
-                                  e.target.value
-                                )
-                              }
-                              placeholder={`Service ${
-                                index + 1
-                              }`}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">
-                              Qty
-                            </label>
-
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                updateItem(
-                                  item.id,
-                                  "quantity",
-                                  e.target.value
-                                )
-                              }
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">
-                              Rate
-                            </label>
-
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.rate}
-                              onChange={(e) =>
-                                updateItem(
-                                  item.id,
-                                  "rate",
-                                  e.target.value
-                                )
-                              }
-                              placeholder="0"
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                            />
-                          </div>
-
-                          <div className="flex items-end justify-end">
-                            <button
-                              onClick={() =>
-                                removeItem(item.id)
-                              }
-                              disabled={
-                                newInvoice.items
-                                  .length === 1
-                              }
-                              className="rounded-lg p-2.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
+                          <input
+                            value={item.description}
+                            onChange={(e) =>
+                              updateItem(
+                                item.id,
+                                "description",
+                                e.target.value
+                              )
+                            }
+                            placeholder={`Service ${index + 1}`}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                          />
                         </div>
-                      )
-                    )}
+
+                        <div>
+                          <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">
+                            Qty
+                          </label>
+
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) =>
+                              updateItem(
+                                item.id,
+                                "quantity",
+                                e.target.value
+                              )
+                            }
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">
+                            Rate
+                          </label>
+
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.rate}
+                            onChange={(e) =>
+                              updateItem(
+                                item.id,
+                                "rate",
+                                e.target.value
+                              )
+                            }
+                            placeholder="0"
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                          />
+                        </div>
+
+                        <div className="flex items-end justify-end">
+                          <button
+                            onClick={() =>
+                              removeItem(item.id)
+                            }
+                            disabled={
+                              newInvoice.items.length === 1
+                            }
+                            className="rounded-lg p-2.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
-                  {/* Total */}
                   <div className="border-t border-slate-200 bg-slate-50 p-4">
                     <div className="ml-auto max-w-xs space-y-2">
                       <div className="flex justify-between text-xs text-slate-500">
                         <span>Subtotal</span>
-
                         <span>
-                          {formatCurrency(
-                            invoiceSubtotal
-                          )}
+                          {formatCurrency(invoiceSubtotal)}
                         </span>
                       </div>
 
                       <div className="flex justify-between text-xs text-slate-500">
                         <span>
-                          Tax (
-                          {Number(newInvoice.tax) ||
-                            0}
-                          %)
+                          Tax ({Number(newInvoice.tax) || 0}%)
                         </span>
-
                         <span>
                           {formatCurrency(taxAmount)}
                         </span>
@@ -1669,17 +1722,10 @@ export default function InvoicesPage() {
                       <div className="flex justify-between text-xs text-slate-500">
                         <span>
                           Discount (
-                          {Number(
-                            newInvoice.discount
-                          ) || 0}
-                          %)
+                          {Number(newInvoice.discount) || 0}%)
                         </span>
-
                         <span>
-                          -
-                          {formatCurrency(
-                            discountAmount
-                          )}
+                          -{formatCurrency(discountAmount)}
                         </span>
                       </div>
 
@@ -1722,8 +1768,7 @@ export default function InvoicesPage() {
           </div>
         )}
 
-        {/* Delete Modal */}
-        {deleteId !== null && (
+        {deleteId !== null && canDelete && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">

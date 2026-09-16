@@ -274,6 +274,13 @@ async function validateRelations(
 
 /**
  * GET /api/files
+ *
+ * Requires:
+ * - Authentication
+ * - files.view permission
+ *
+ * Ownership:
+ * - Only returns files belonging to authenticated user.
  */
 router.get(
   "/",
@@ -311,6 +318,13 @@ router.get(
 
 /**
  * GET /api/files/:id/download
+ *
+ * Requires:
+ * - Authentication
+ * - files.view permission
+ *
+ * Ownership:
+ * - File must belong to authenticated user.
  */
 router.get(
   "/:id/download",
@@ -375,6 +389,10 @@ router.get(
 
 /**
  * POST /api/files/:id/duplicate
+ *
+ * Requires:
+ * - Authentication
+ * - files.create permission
  */
 router.post(
   "/:id/duplicate",
@@ -407,12 +425,6 @@ router.post(
         });
       }
 
-      /*
-       * The source file has already been restricted to the
-       * authenticated user's files. Its linked records are
-       * therefore safe to reuse, but we still validate them
-       * before creating the duplicate.
-       */
       const relations =
         await validateRelations(
           userId,
@@ -469,10 +481,27 @@ router.post(
               storagePath: newStorageName,
               folder: existingFile.folder,
               shared: false,
-              client: existingFile.client,
-              project: existingFile.project,
-              clientId: existingFile.clientId,
-              projectId: existingFile.projectId,
+
+              client:
+                relations.client?.name ??
+                existingFile.client ??
+                null,
+
+              project:
+                relations.project?.name ??
+                existingFile.project ??
+                null,
+
+              clientId:
+                relations.client?.id ??
+                existingFile.clientId ??
+                null,
+
+              projectId:
+                relations.project?.id ??
+                existingFile.projectId ??
+                null,
+
               userId,
             },
           });
@@ -508,6 +537,10 @@ router.post(
 
 /**
  * GET /api/files/:id
+ *
+ * Requires:
+ * - Authentication
+ * - files.view permission
  */
 router.get(
   "/:id",
@@ -559,6 +592,10 @@ router.get(
 
 /**
  * POST /api/files/upload
+ *
+ * Requires:
+ * - Authentication
+ * - files.create permission
  */
 router.post(
   "/upload",
@@ -647,29 +684,23 @@ router.post(
             folder: data.folder,
             shared: data.shared,
 
-            ...(data.client !== undefined
-              ? {
-                  client: data.client,
-                }
-              : {}),
+            client:
+              relations.client?.name ??
+              data.client ??
+              null,
 
-            ...(data.project !== undefined
-              ? {
-                  project: data.project,
-                }
-              : {}),
+            project:
+              relations.project?.name ??
+              data.project ??
+              null,
 
-            ...(data.clientId !== undefined
-              ? {
-                  clientId: data.clientId,
-                }
-              : {}),
+            clientId:
+              relations.client?.id ??
+              null,
 
-            ...(data.projectId !== undefined
-              ? {
-                  projectId: data.projectId,
-                }
-              : {}),
+            projectId:
+              relations.project?.id ??
+              null,
 
             userId,
           },
@@ -705,6 +736,14 @@ router.post(
 
 /**
  * PATCH /api/files/:id
+ *
+ * Requires:
+ * - Authentication
+ * - files.update permission
+ *
+ * Ownership:
+ * - Existing file must belong to authenticated user.
+ * - Final client/project must belong to authenticated user.
  */
 router.patch(
   "/:id",
@@ -749,12 +788,6 @@ router.patch(
         });
       }
 
-      /*
-       * Validate the FINAL relationship state.
-       *
-       * This is important when only one relation is changed
-       * during a PATCH request.
-       */
       const effectiveClientId =
         data.clientId !== undefined
           ? data.clientId
@@ -804,27 +837,55 @@ router.patch(
                 }
               : {}),
 
-            ...(data.client !== undefined
+            /*
+             * When clientId changes, synchronize the
+             * denormalized client name.
+             */
+            ...(data.clientId !== undefined
+              ? {
+                  clientId:
+                    relations.client?.id ??
+                    null,
+
+                  client:
+                    relations.client?.name ??
+                    null,
+                }
+              : {}),
+
+            /*
+             * When projectId changes, synchronize the
+             * denormalized project name.
+             */
+            ...(data.projectId !== undefined
+              ? {
+                  projectId:
+                    relations.project?.id ??
+                    null,
+
+                  project:
+                    relations.project?.name ??
+                    null,
+                }
+              : {}),
+
+            /*
+             * If no relation ID is being changed and there
+             * is no linked relation, allow manual text.
+             */
+            ...(data.clientId === undefined &&
+            data.client !== undefined &&
+            effectiveClientId === null
               ? {
                   client: data.client,
                 }
               : {}),
 
-            ...(data.project !== undefined
+            ...(data.projectId === undefined &&
+            data.project !== undefined &&
+            effectiveProjectId === null
               ? {
                   project: data.project,
-                }
-              : {}),
-
-            ...(data.clientId !== undefined
-              ? {
-                  clientId: data.clientId,
-                }
-              : {}),
-
-            ...(data.projectId !== undefined
-              ? {
-                  projectId: data.projectId,
                 }
               : {}),
           },
@@ -852,6 +913,13 @@ router.patch(
 
 /**
  * DELETE /api/files/:id
+ *
+ * Requires:
+ * - Authentication
+ * - files.delete permission
+ *
+ * Ownership:
+ * - File must belong to authenticated user.
  */
 router.delete(
   "/:id",

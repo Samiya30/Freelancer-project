@@ -9,6 +9,7 @@ import {
 } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 import {
   Search,
   Upload,
@@ -173,70 +174,6 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function getFileType(fileName: string): FileType {
-  const extension = fileName
-    .split(".")
-    .pop()
-    ?.toLowerCase();
-
-  if (extension === "pdf") {
-    return "PDF";
-  }
-
-  if (
-    extension === "doc" ||
-    extension === "docx"
-  ) {
-    return "DOC";
-  }
-
-  if (
-    extension === "xls" ||
-    extension === "xlsx" ||
-    extension === "csv"
-  ) {
-    return "XLS";
-  }
-
-  if (
-    [
-      "png",
-      "jpg",
-      "jpeg",
-      "webp",
-      "gif",
-      "svg",
-    ].includes(extension ?? "")
-  ) {
-    return "IMAGE";
-  }
-
-  if (
-    ["zip", "rar", "7z"].includes(
-      extension ?? ""
-    )
-  ) {
-    return "ZIP";
-  }
-
-  if (
-    [
-      "js",
-      "ts",
-      "tsx",
-      "jsx",
-      "html",
-      "css",
-      "json",
-      "md",
-    ].includes(extension ?? "")
-  ) {
-    return "CODE";
-  }
-
-  return "OTHER";
-}
-
 function mapApiFile(file: ApiFile): WorkspaceFile {
   return {
     id: file.id,
@@ -253,11 +190,14 @@ function mapApiFile(file: ApiFile): WorkspaceFile {
 
 export default function FilesPage() {
   const { showToast } = useToast();
+  const { hasPermission } = useAuth();
+
+  const canCreate = hasPermission("files.create");
+  const canUpdate = hasPermission("files.update");
+  const canDelete = hasPermission("files.delete");
 
   const [folders, setFolders] =
-    useState<WorkspaceFolder[]>(
-      initialFolders
-    );
+    useState<WorkspaceFolder[]>(initialFolders);
 
   const [files, setFiles] =
     useState<WorkspaceFile[]>([]);
@@ -309,9 +249,7 @@ export default function FilesPage() {
         }
 
         const mappedFiles =
-          (response.data ?? []).map(
-            mapApiFile
-          );
+          (response.data ?? []).map(mapApiFile);
 
         setFiles(mappedFiles);
       } catch (error) {
@@ -419,12 +357,31 @@ export default function FilesPage() {
   ).length;
 
   const handleUploadClick = () => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to upload files.",
+        "error"
+      );
+      return;
+    }
+
     fileInputRef.current?.click();
   };
 
   const handleUpload = async (
     event: ChangeEvent<HTMLInputElement>
   ) => {
+    if (!canCreate) {
+      event.target.value = "";
+
+      showToast(
+        "You do not have permission to upload files.",
+        "error"
+      );
+
+      return;
+    }
+
     const selectedFiles = Array.from(
       event.target.files ?? []
     );
@@ -454,7 +411,7 @@ export default function FilesPage() {
             shared: false,
           });
 
-        if (response.data) {
+        if (response.success && response.data) {
           createdFiles.push(
             mapApiFile(response.data)
           );
@@ -466,14 +423,21 @@ export default function FilesPage() {
         ...current,
       ]);
 
-      showToast(
-        `${createdFiles.length} file${
-          createdFiles.length > 1
-            ? "s"
-            : ""
-        } uploaded successfully.`,
-        "success"
-      );
+      if (createdFiles.length > 0) {
+        showToast(
+          `${createdFiles.length} file${
+            createdFiles.length > 1
+              ? "s"
+              : ""
+          } uploaded successfully.`,
+          "success"
+        );
+      } else {
+        showToast(
+          "No files were uploaded.",
+          "error"
+        );
+      }
     } catch (error) {
       console.error(
         "Failed to upload files:",
@@ -493,6 +457,14 @@ export default function FilesPage() {
   };
 
   const handleCreateFolder = () => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create folders.",
+        "error"
+      );
+      return;
+    }
+
     if (!newFolderName.trim()) {
       showToast(
         "Enter a folder name.",
@@ -561,13 +533,21 @@ export default function FilesPage() {
   const handleDuplicate = async (
     file: WorkspaceFile
   ) => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to duplicate files.",
+        "error"
+      );
+      return;
+    }
+
     try {
       setActionLoading(file.id);
 
       const response =
         await duplicateFile(file.id);
 
-      if (response.data) {
+      if (response.success && response.data) {
         setFiles((current) => [
           mapApiFile(response.data!),
           ...current,
@@ -600,6 +580,14 @@ export default function FilesPage() {
   const handleShare = async (
     file: WorkspaceFile
   ) => {
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update files.",
+        "error"
+      );
+      return;
+    }
+
     try {
       setActionLoading(file.id);
 
@@ -611,7 +599,7 @@ export default function FilesPage() {
           }
         );
 
-      if (response.data) {
+      if (response.success && response.data) {
         const updatedFile =
           mapApiFile(response.data);
 
@@ -650,6 +638,14 @@ export default function FilesPage() {
   const handleUnshare = async (
     file: WorkspaceFile
   ) => {
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update files.",
+        "error"
+      );
+      return;
+    }
+
     try {
       setActionLoading(file.id);
 
@@ -661,7 +657,7 @@ export default function FilesPage() {
           }
         );
 
-      if (response.data) {
+      if (response.success && response.data) {
         const updatedFile =
           mapApiFile(response.data);
 
@@ -698,6 +694,14 @@ export default function FilesPage() {
   };
 
   const handleDelete = async () => {
+    if (!canDelete) {
+      showToast(
+        "You do not have permission to delete files.",
+        "error"
+      );
+      return;
+    }
+
     if (deleteFileId === null) {
       return;
     }
@@ -705,7 +709,15 @@ export default function FilesPage() {
     try {
       setActionLoading(deleteFileId);
 
-      await deleteFile(deleteFileId);
+      const response =
+        await deleteFile(deleteFileId);
+
+      if (!response.success) {
+        throw new Error(
+          response.message ||
+            "Failed to delete file."
+        );
+      }
 
       setFiles((current) =>
         current.filter(
@@ -760,24 +772,28 @@ export default function FilesPage() {
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  onClick={() =>
-                    setNewFolderOpen(true)
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                >
-                  <Folder className="h-4 w-4" />
-                  New Folder
-                </button>
+                {canCreate && (
+                  <button
+                    onClick={() =>
+                      setNewFolderOpen(true)
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <Folder className="h-4 w-4" />
+                    New Folder
+                  </button>
+                )}
 
-                <button
-                  onClick={handleUploadClick}
-                  disabled={loading}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Upload className="h-4 w-4" />
-                  Upload Files
-                </button>
+                {canCreate && (
+                  <button
+                    onClick={handleUploadClick}
+                    disabled={loading}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Upload Files
+                  </button>
+                )}
 
                 <input
                   ref={fileInputRef}
@@ -898,9 +914,7 @@ export default function FilesPage() {
 
               <button
                 onClick={() =>
-                  setSelectedFolder(
-                    "All Files"
-                  )
+                  setSelectedFolder("All Files")
                 }
                 className="text-xs font-semibold text-cyan-600 hover:text-cyan-700"
               >
@@ -1070,8 +1084,7 @@ export default function FilesPage() {
                 </p>
 
                 <p className="mt-0.5 text-xs text-slate-400">
-                  {filteredFiles.length}{" "}
-                  files shown
+                  {filteredFiles.length} files shown
                 </p>
               </div>
 
@@ -1106,8 +1119,7 @@ export default function FilesPage() {
                 </div>
 
                 <span className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm">
-                  {filteredFiles.length}{" "}
-                  files
+                  {filteredFiles.length} files
                 </span>
               </div>
             </div>
@@ -1126,8 +1138,7 @@ export default function FilesPage() {
                   Fetching your workspace files.
                 </p>
               </div>
-            ) : filteredFiles.length ===
-              0 ? (
+            ) : filteredFiles.length === 0 ? (
               <div className="p-14 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-400">
                   <File className="h-6 w-6" />
@@ -1141,8 +1152,7 @@ export default function FilesPage() {
                   Try another search or upload a new file.
                 </p>
               </div>
-            ) : viewMode ===
-              "grid" ? (
+            ) : viewMode === "grid" ? (
               <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {filteredFiles.map(
                   (file) => (
@@ -1156,9 +1166,7 @@ export default function FilesPage() {
                             file.type
                           )}`}
                         >
-                          {getFileIcon(
-                            file.type
-                          )}
+                          {getFileIcon(file.type)}
                         </div>
 
                         <div className="relative">
@@ -1180,14 +1188,16 @@ export default function FilesPage() {
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
 
-                          {menuId ===
-                            file.id && (
+                          {menuId === file.id && (
                             <FileMenu
                               file={file}
                               disabled={
                                 actionLoading ===
                                 file.id
                               }
+                              canCreate={canCreate}
+                              canUpdate={canUpdate}
+                              canDelete={canDelete}
                               onDownload={
                                 handleDownload
                               }
@@ -1261,9 +1271,7 @@ export default function FilesPage() {
                           file.type
                         )}`}
                       >
-                        {getFileIcon(
-                          file.type
-                        )}
+                        {getFileIcon(file.type)}
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -1321,14 +1329,16 @@ export default function FilesPage() {
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
 
-                          {menuId ===
-                            file.id && (
+                          {menuId === file.id && (
                             <FileMenu
                               file={file}
                               disabled={
                                 actionLoading ===
                                 file.id
                               }
+                              canCreate={canCreate}
+                              canUpdate={canUpdate}
+                              canDelete={canDelete}
                               onDownload={
                                 handleDownload
                               }
@@ -1386,7 +1396,7 @@ export default function FilesPage() {
           </div>
         </main>
 
-        {newFolderOpen && (
+        {newFolderOpen && canCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
               <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-5 text-white">
@@ -1445,9 +1455,7 @@ export default function FilesPage() {
                   </button>
 
                   <button
-                    onClick={
-                      handleCreateFolder
-                    }
+                    onClick={handleCreateFolder}
                     className="rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200"
                   >
                     Create Folder
@@ -1458,7 +1466,7 @@ export default function FilesPage() {
           </div>
         )}
 
-        {deleteFileId !== null && (
+        {deleteFileId !== null && canDelete && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
@@ -1509,6 +1517,9 @@ export default function FilesPage() {
 function FileMenu({
   file,
   disabled,
+  canCreate,
+  canUpdate,
+  canDelete,
   onDownload,
   onDuplicate,
   onShare,
@@ -1517,6 +1528,9 @@ function FileMenu({
 }: {
   file: WorkspaceFile;
   disabled: boolean;
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
   onDownload: (
     file: WorkspaceFile
   ) => void;
@@ -1544,49 +1558,54 @@ function FileMenu({
         Download
       </button>
 
-      <button
-        disabled={disabled}
-        onClick={() =>
-          onDuplicate(file)
-        }
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-      >
-        <Copy className="h-3.5 w-3.5" />
-        Duplicate
-      </button>
-
-      {file.shared ? (
+      {canCreate && (
         <button
           disabled={disabled}
           onClick={() =>
-            onUnshare(file)
+            onDuplicate(file)
           }
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
-          <Share2 className="h-3.5 w-3.5" />
-          Stop Sharing
-        </button>
-      ) : (
-        <button
-          disabled={disabled}
-          onClick={() =>
-            onShare(file)
-          }
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-        >
-          <Share2 className="h-3.5 w-3.5" />
-          Share with Client
+          <Copy className="h-3.5 w-3.5" />
+          Duplicate
         </button>
       )}
 
-      <button
-        disabled={disabled}
-        onClick={onDelete}
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        Delete
-      </button>
+      {canUpdate &&
+        (file.shared ? (
+          <button
+            disabled={disabled}
+            onClick={() =>
+              onUnshare(file)
+            }
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            Stop Sharing
+          </button>
+        ) : (
+          <button
+            disabled={disabled}
+            onClick={() =>
+              onShare(file)
+            }
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            Share with Client
+          </button>
+        ))}
+
+      {canDelete && (
+        <button
+          disabled={disabled}
+          onClick={onDelete}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Delete
+        </button>
+      )}
     </div>
   );
 }

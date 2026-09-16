@@ -144,6 +144,12 @@ const workspaceItems: NavigationItem[] = [
     permission: "reports.view",
   },
   {
+    name: "Team",
+    icon: Users,
+    href: "/team",
+    permission: "members.view",
+  },
+  {
     name: "Settings",
     icon: Settings,
     href: "/settings",

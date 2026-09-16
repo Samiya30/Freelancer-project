@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 import {
   createLead,
@@ -133,7 +134,7 @@ function getAvatarGradient(name: string) {
       .reduce(
         (sum, char) =>
           sum + char.charCodeAt(0),
-        0
+        0,
       ) % gradients.length;
 
   return gradients[index];
@@ -161,6 +162,16 @@ function formatDate(date: string) {
 
 export default function LeadsPage() {
   const { showToast } = useToast();
+  const { hasPermission } = useAuth();
+
+  const canCreate =
+    hasPermission("leads.create");
+
+  const canUpdate =
+    hasPermission("leads.update");
+
+  const canDelete =
+    hasPermission("leads.delete");
 
   const [leads, setLeads] =
     useState<ApiLead[]>([]);
@@ -223,7 +234,7 @@ export default function LeadsPage() {
       } catch (error) {
         console.error(
           "Failed to load leads:",
-          error
+          error,
         );
 
         if (!cancelled) {
@@ -231,7 +242,7 @@ export default function LeadsPage() {
 
           showToast(
             "Could not load leads from the server.",
-            "error"
+            "error",
           );
         }
       } finally {
@@ -293,26 +304,26 @@ export default function LeadsPage() {
     leads.reduce(
       (sum, lead) =>
         sum + lead.value,
-      0
+      0,
     );
 
   const activeLeads =
     leads.filter(
       (lead) =>
         lead.status !== "Won" &&
-        lead.status !== "Lost"
+        lead.status !== "Lost",
     ).length;
 
   const wonRevenue =
     leads
       .filter(
         (lead) =>
-          lead.status === "Won"
+          lead.status === "Won",
       )
       .reduce(
         (sum, lead) =>
           sum + lead.value,
-        0
+        0,
       );
 
   const conversionRate =
@@ -320,10 +331,10 @@ export default function LeadsPage() {
       ? Math.round(
           (leads.filter(
             (lead) =>
-              lead.status === "Won"
+              lead.status === "Won",
           ).length /
             leads.length) *
-            100
+            100,
         )
       : 0;
 
@@ -339,7 +350,7 @@ export default function LeadsPage() {
     ) {
       showToast(
         "Please fill in all required fields.",
-        "error"
+        "error",
       );
       return;
     }
@@ -353,7 +364,7 @@ export default function LeadsPage() {
     ) {
       showToast(
         "Please enter a valid deal value.",
-        "error"
+        "error",
       );
       return;
     }
@@ -401,23 +412,26 @@ export default function LeadsPage() {
 
         showToast(
           "Lead added successfully.",
-          "success"
+          "success",
         );
       } else {
         showToast(
-          "Could not create lead.",
-          "error"
+          response.message ||
+            "Could not create lead.",
+          "error",
         );
       }
     } catch (error) {
       console.error(
         "Failed to create lead:",
-        error
+        error,
       );
 
       showToast(
-        "Could not create lead. Please try again.",
-        "error"
+        error instanceof Error
+          ? error.message
+          : "Could not create lead. Please try again.",
+        "error",
       );
     } finally {
       setSaving(false);
@@ -429,7 +443,7 @@ export default function LeadsPage() {
    */
   const handleStatusChange = async (
     lead: ApiLead,
-    status: LeadStatus
+    status: LeadStatus,
   ) => {
     try {
       const response =
@@ -437,7 +451,7 @@ export default function LeadsPage() {
           lead.id,
           {
             status,
-          }
+          },
         );
 
       if (
@@ -448,29 +462,32 @@ export default function LeadsPage() {
           current.map((item) =>
             item.id === lead.id
               ? response.data!
-              : item
-          )
+              : item,
+          ),
         );
 
         showToast(
           `${lead.name} moved to ${status}.`,
-          "success"
+          "success",
         );
       } else {
         showToast(
-          "Could not update lead status.",
-          "error"
+          response.message ||
+            "Could not update lead status.",
+          "error",
         );
       }
     } catch (error) {
       console.error(
         "Failed to update lead status:",
-        error
+        error,
       );
 
       showToast(
-        "Could not update lead status. Please try again.",
-        "error"
+        error instanceof Error
+          ? error.message
+          : "Could not update lead status. Please try again.",
+        "error",
       );
     }
   };
@@ -492,8 +509,8 @@ export default function LeadsPage() {
       if (response.success) {
         setLeads((current) =>
           current.filter(
-            (lead) => lead.id !== id
-          )
+            (lead) => lead.id !== id,
+          ),
         );
 
         setDeleteId(null);
@@ -501,23 +518,26 @@ export default function LeadsPage() {
 
         showToast(
           "Lead deleted successfully.",
-          "success"
+          "success",
         );
       } else {
         showToast(
-          "Could not delete lead.",
-          "error"
+          response.message ||
+            "Could not delete lead.",
+          "error",
         );
       }
     } catch (error) {
       console.error(
         "Failed to delete lead:",
-        error
+        error,
       );
 
       showToast(
-        "Could not delete lead. Please try again.",
-        "error"
+        error instanceof Error
+          ? error.message
+          : "Could not delete lead. Please try again.",
+        "error",
       );
     }
   };
@@ -573,15 +593,17 @@ export default function LeadsPage() {
 
               </div>
 
-              <button
-                onClick={() =>
-                  setAddOpen(true)
-                }
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:shadow-xl"
-              >
-                <Plus className="h-4 w-4" />
-                Add Lead
-              </button>
+              {canCreate && (
+                <button
+                  onClick={() =>
+                    setAddOpen(true)
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Lead
+                </button>
+              )}
 
             </div>
           </div>
@@ -603,7 +625,7 @@ export default function LeadsPage() {
 
                   <p className="mt-2 text-2xl font-bold">
                     {formatCurrency(
-                      totalPipeline
+                      totalPipeline,
                     )}
                   </p>
 
@@ -655,7 +677,7 @@ export default function LeadsPage() {
 
                   <p className="mt-2 text-2xl font-bold">
                     {formatCurrency(
-                      wonRevenue
+                      wonRevenue,
                     )}
                   </p>
 
@@ -711,7 +733,7 @@ export default function LeadsPage() {
                   value={search}
                   onChange={(e) =>
                     setSearch(
-                      e.target.value
+                      e.target.value,
                     )
                   }
                   placeholder="Search leads by name, company, email or phone..."
@@ -724,7 +746,7 @@ export default function LeadsPage() {
                 value={sourceFilter}
                 onChange={(e) =>
                   setSourceFilter(
-                    e.target.value
+                    e.target.value,
                   )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
@@ -740,7 +762,7 @@ export default function LeadsPage() {
                     >
                       {source}
                     </option>
-                  )
+                  ),
                 )}
               </select>
 
@@ -759,14 +781,14 @@ export default function LeadsPage() {
                     filteredLeads.filter(
                       (lead) =>
                         lead.status ===
-                        column.status
+                        column.status,
                     );
 
                   const columnValue =
                     columnLeads.reduce(
                       (sum, lead) =>
                         sum + lead.value,
-                      0
+                      0,
                     );
 
                   return (
@@ -814,7 +836,11 @@ export default function LeadsPage() {
 
                           </div>
 
-                          <button className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-slate-700">
+                          <button
+                            type="button"
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-slate-700"
+                            aria-label={`${column.title} column options`}
+                          >
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
 
@@ -830,7 +856,7 @@ export default function LeadsPage() {
                             className={`mt-0.5 text-sm font-bold ${column.color}`}
                           >
                             {formatCurrency(
-                              columnValue
+                              columnValue,
                             )}
                           </p>
 
@@ -857,11 +883,11 @@ export default function LeadsPage() {
 
                                   <div
                                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${getAvatarGradient(
-                                      lead.name
+                                      lead.name,
                                     )} text-xs font-bold text-white shadow-sm`}
                                   >
                                     {getInitials(
-                                      lead.name
+                                      lead.name,
                                     )}
                                   </div>
 
@@ -883,45 +909,48 @@ export default function LeadsPage() {
 
                                 </div>
 
-                                <div className="relative">
+                                {canDelete && (
+                                  <div className="relative">
 
-                                  <button
-                                    onClick={() =>
-                                      setMenuLeadId(
-                                        menuLeadId ===
-                                          lead.id
-                                          ? null
-                                          : lead.id
-                                      )
-                                    }
-                                    className="rounded-lg p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100"
-                                  >
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </button>
-
-                                  {menuLeadId ===
-                                    lead.id && (
-                                    <div className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-
-                                      <button
-                                        onClick={() => {
-                                          setDeleteId(
+                                    <button
+                                      onClick={() =>
+                                        setMenuLeadId(
+                                          menuLeadId ===
                                             lead.id
-                                          );
-                                          setMenuLeadId(
-                                            null
-                                          );
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium text-rose-600 hover:bg-rose-50"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                        Delete lead
-                                      </button>
+                                            ? null
+                                            : lead.id,
+                                        )
+                                      }
+                                      className="rounded-lg p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100"
+                                      aria-label={`Actions for ${lead.name}`}
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </button>
 
-                                    </div>
-                                  )}
+                                    {menuLeadId ===
+                                      lead.id && (
+                                      <div className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
 
-                                </div>
+                                        <button
+                                          onClick={() => {
+                                            setDeleteId(
+                                              lead.id,
+                                            );
+                                            setMenuLeadId(
+                                              null,
+                                            );
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium text-rose-600 hover:bg-rose-50"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                          Delete lead
+                                        </button>
+
+                                      </div>
+                                    )}
+
+                                  </div>
+                                )}
 
                               </div>
 
@@ -933,7 +962,7 @@ export default function LeadsPage() {
 
                                 <p className="mt-1 text-lg font-bold text-slate-900">
                                   {formatCurrency(
-                                    lead.value
+                                    lead.value,
                                   )}
                                 </p>
 
@@ -978,7 +1007,7 @@ export default function LeadsPage() {
 
                                   <span>
                                     {formatDate(
-                                      lead.createdAt
+                                      lead.createdAt,
                                     )}
                                   </span>
                                 </div>
@@ -993,52 +1022,64 @@ export default function LeadsPage() {
                                   }
                                 </span>
 
-                                <div className="relative">
+                                {canUpdate ? (
+                                  <div className="relative">
 
-                                  <select
-                                    value={
+                                    <select
+                                      value={
+                                        lead.status
+                                      }
+                                      onChange={(
+                                        e,
+                                      ) =>
+                                        handleStatusChange(
+                                          lead,
+                                          e.target
+                                            .value as LeadStatus,
+                                        )
+                                      }
+                                      className="appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-2 pr-7 text-[10px] font-semibold text-slate-600 outline-none focus:border-violet-400"
+                                    >
+                                      {columns.map(
+                                        (
+                                          item,
+                                        ) => (
+                                          <option
+                                            key={
+                                              item.status
+                                            }
+                                            value={
+                                              item.status
+                                            }
+                                          >
+                                            {
+                                              item.status
+                                            }
+                                          </option>
+                                        ),
+                                      )}
+                                    </select>
+
+                                    <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+
+                                  </div>
+                                ) : (
+                                  <span
+                                    className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                                      column.color
+                                    } ${column.light}`}
+                                  >
+                                    {
                                       lead.status
                                     }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleStatusChange(
-                                        lead,
-                                        e.target
-                                          .value as LeadStatus
-                                      )
-                                    }
-                                    className="appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-2 pr-7 text-[10px] font-semibold text-slate-600 outline-none focus:border-violet-400"
-                                  >
-                                    {columns.map(
-                                      (
-                                        item
-                                      ) => (
-                                        <option
-                                          key={
-                                            item.status
-                                          }
-                                          value={
-                                            item.status
-                                          }
-                                        >
-                                          {
-                                            item.status
-                                          }
-                                        </option>
-                                      )
-                                    )}
-                                  </select>
-
-                                  <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
-
-                                </div>
+                                  </span>
+                                )}
 
                               </div>
 
                             </div>
 
-                          )
+                          ),
                         )}
 
                         {columnLeads.length ===
@@ -1062,19 +1103,21 @@ export default function LeadsPage() {
 
                       </div>
 
-                      <button
-                        onClick={() =>
-                          setAddOpen(true)
-                        }
-                        className={`m-3 mt-0 flex items-center justify-center gap-1.5 rounded-xl border border-dashed ${column.border} bg-white/60 py-2.5 text-xs font-semibold ${column.color} transition hover:bg-white`}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Add Lead
-                      </button>
+                      {canCreate && (
+                        <button
+                          onClick={() =>
+                            setAddOpen(true)
+                          }
+                          className={`m-3 mt-0 flex items-center justify-center gap-1.5 rounded-xl border border-dashed ${column.border} bg-white/60 py-2.5 text-xs font-semibold ${column.color} transition hover:bg-white`}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Lead
+                        </button>
+                      )}
 
                     </div>
                   );
-                }
+                },
               )}
 
             </div>
@@ -1116,7 +1159,7 @@ export default function LeadsPage() {
         </main>
 
         {/* ADD LEAD MODAL */}
-        {addOpen && (
+        {addOpen && canCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
 
             <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
@@ -1306,7 +1349,7 @@ export default function LeadsPage() {
                           >
                             {source}
                           </option>
-                        )
+                        ),
                       )}
                     </select>
 
@@ -1347,48 +1390,49 @@ export default function LeadsPage() {
         )}
 
         {/* DELETE MODAL */}
-        {deleteId !== null && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+        {deleteId !== null &&
+          canDelete && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
 
-            <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+              <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
 
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
-                <Trash2 className="h-5 w-5" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+
+                <h2 className="mt-5 text-lg font-bold text-slate-900">
+                  Delete this lead?
+                </h2>
+
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  This action cannot be undone. The lead will be permanently removed from your pipeline.
+                </p>
+
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+
+                  <button
+                    onClick={() =>
+                      setDeleteId(null)
+                    }
+                    className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={
+                      handleDelete
+                    }
+                    className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-100 hover:bg-rose-700"
+                  >
+                    Delete Lead
+                  </button>
+
+                </div>
+
               </div>
-
-              <h2 className="mt-5 text-lg font-bold text-slate-900">
-                Delete this lead?
-              </h2>
-
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                This action cannot be undone. The lead will be permanently removed from your pipeline.
-              </p>
-
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-
-                <button
-                  onClick={() =>
-                    setDeleteId(null)
-                  }
-                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={
-                    handleDelete
-                  }
-                  className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-100 hover:bg-rose-700"
-                >
-                  Delete Lead
-                </button>
-
-              </div>
-
             </div>
-          </div>
-        )}
+          )}
 
       </div>
     </AppShell>

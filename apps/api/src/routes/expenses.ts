@@ -210,17 +210,9 @@ router.post(
           date: data.date,
           status: data.status,
 
-          ...(data.project !== undefined
-            ? { project: data.project }
-            : {}),
-
-          ...(data.vendor !== undefined
-            ? { vendor: data.vendor }
-            : {}),
-
-          ...(data.projectId !== undefined
-            ? { projectId: data.projectId }
-            : {}),
+          project: project?.name ?? data.project ?? null,
+          vendor: data.vendor ?? null,
+          projectId: project?.id ?? null,
         },
         include: {
           projectRecord: true,
@@ -349,16 +341,31 @@ router.patch(
             ? { status: data.status }
             : {}),
 
-          ...(data.project !== undefined
-            ? { project: data.project }
-            : {}),
-
           ...(data.vendor !== undefined
             ? { vendor: data.vendor }
             : {}),
 
+          /*
+           * If projectId is part of the PATCH:
+           * - validate it against the authenticated user
+           * - store the validated project ID
+           * - synchronize the denormalized project name
+           */
           ...(data.projectId !== undefined
-            ? { projectId: data.projectId }
+            ? {
+                projectId: project?.id ?? null,
+                project: project?.name ?? null,
+              }
+            : {}),
+
+          /*
+           * If no projectId was supplied but the existing expense
+           * has no linked project, allow manual project text.
+           */
+          ...(data.projectId === undefined &&
+          data.project !== undefined &&
+          finalProjectId === null
+            ? { project: data.project }
             : {}),
         },
         include: {

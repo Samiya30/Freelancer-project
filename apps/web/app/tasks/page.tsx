@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
+
 import {
   Plus,
   Search,
@@ -67,10 +69,13 @@ function toApiStatus(status: TaskStatus): ApiTaskStatus {
   switch (status) {
     case "To Do":
       return "ToDo";
+
     case "In Progress":
       return "InProgress";
+
     case "Review":
       return "Review";
+
     case "Done":
       return "Done";
   }
@@ -80,10 +85,13 @@ function fromApiStatus(status: ApiTaskStatus): TaskStatus {
   switch (status) {
     case "ToDo":
       return "To Do";
+
     case "InProgress":
       return "In Progress";
+
     case "Review":
       return "Review";
+
     case "Done":
       return "Done";
   }
@@ -108,7 +116,9 @@ function formatDate(date: string) {
 function toIsoDate(date: string) {
   if (!date) return "";
 
-  const parsed = new Date(`${date}T00:00:00.000Z`);
+  const parsed = new Date(
+    `${date}T00:00:00.000Z`,
+  );
 
   if (Number.isNaN(parsed.getTime())) {
     return "";
@@ -121,10 +131,13 @@ function getPriorityStyle(priority: TaskPriority) {
   switch (priority) {
     case "Urgent":
       return "bg-rose-50 text-rose-700 border-rose-200";
+
     case "High":
       return "bg-orange-50 text-orange-700 border-orange-200";
+
     case "Medium":
       return "bg-amber-50 text-amber-700 border-amber-200";
+
     default:
       return "bg-slate-100 text-slate-600 border-slate-200";
   }
@@ -134,10 +147,13 @@ function getStatusIcon(status: TaskStatus) {
   switch (status) {
     case "To Do":
       return <CircleDot className="h-3.5 w-3.5" />;
+
     case "In Progress":
       return <Clock3 className="h-3.5 w-3.5" />;
+
     case "Review":
       return <Eye className="h-3.5 w-3.5" />;
+
     case "Done":
       return <CheckCircle2 className="h-3.5 w-3.5" />;
   }
@@ -150,10 +166,10 @@ function getPriorityIcon(priority: TaskPriority) {
         priority === "Urgent"
           ? "fill-rose-500 text-rose-500"
           : priority === "High"
-          ? "fill-orange-500 text-orange-500"
-          : priority === "Medium"
-          ? "fill-amber-500 text-amber-500"
-          : "text-slate-400"
+            ? "fill-orange-500 text-orange-500"
+            : priority === "Medium"
+              ? "fill-amber-500 text-amber-500"
+              : "text-slate-400"
       }`}
     />
   );
@@ -171,14 +187,16 @@ function getProjectGradient(project: string) {
   const index =
     project.split("").reduce(
       (sum, char) => sum + char.charCodeAt(0),
-      0
+      0,
     ) % gradients.length;
 
   return gradients[index];
 }
 
 function isOverdue(task: ApiTask) {
-  if (task.status === "Done") return false;
+  if (task.status === "Done") {
+    return false;
+  }
 
   const dueDate = new Date(task.dueDate);
 
@@ -194,6 +212,12 @@ function isOverdue(task: ApiTask) {
 
 export default function TasksPage() {
   const { showToast } = useToast();
+
+  const { hasPermission } = useAuth();
+
+  const canCreate = hasPermission("tasks.create");
+  const canUpdate = hasPermission("tasks.update");
+  const canDelete = hasPermission("tasks.delete");
 
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -223,33 +247,39 @@ export default function TasksPage() {
       try {
         setLoading(true);
 
-        const [tasksResponse, projectsResponse] = await Promise.all([
-          getTasks(),
-          getProjects(),
-        ]);
+        const [tasksResponse, projectsResponse] =
+          await Promise.all([
+            getTasks(),
+            getProjects(),
+          ]);
 
         if (!tasksResponse.success) {
           throw new Error(
-            tasksResponse.message || "Failed to load tasks"
+            tasksResponse.message ||
+              "Failed to load tasks",
           );
         }
 
         if (!projectsResponse.success) {
           throw new Error(
-            projectsResponse.message || "Failed to load projects"
+            projectsResponse.message ||
+              "Failed to load projects",
           );
         }
 
         setTasks(tasksResponse.data ?? []);
         setProjects(projectsResponse.data ?? []);
       } catch (error) {
-        console.error("Failed to load tasks:", error);
+        console.error(
+          "Failed to load tasks:",
+          error,
+        );
 
         showToast(
           error instanceof Error
             ? error.message
             : "Failed to load tasks.",
-          "error"
+          "error",
         );
       } finally {
         setLoading(false);
@@ -265,9 +295,15 @@ export default function TasksPage() {
     return tasks.filter((task) => {
       const matchesSearch =
         !query ||
-        task.title.toLowerCase().includes(query) ||
-        task.description.toLowerCase().includes(query) ||
-        task.projectName.toLowerCase().includes(query);
+        task.title
+          .toLowerCase()
+          .includes(query) ||
+        task.description
+          .toLowerCase()
+          .includes(query) ||
+        task.projectName
+          .toLowerCase()
+          .includes(query);
 
       const matchesProject =
         projectFilter === "All" ||
@@ -277,23 +313,42 @@ export default function TasksPage() {
         priorityFilter === "All" ||
         task.priority === priorityFilter;
 
-      return matchesSearch && matchesProject && matchesPriority;
+      return (
+        matchesSearch &&
+        matchesProject &&
+        matchesPriority
+      );
     });
-  }, [tasks, search, projectFilter, priorityFilter]);
+  }, [
+    tasks,
+    search,
+    projectFilter,
+    priorityFilter,
+  ]);
 
   const totalTasks = tasks.length;
 
   const inProgressTasks = tasks.filter(
-    (task) => task.status === "InProgress"
+    (task) =>
+      task.status === "InProgress",
   ).length;
 
   const completedTasks = tasks.filter(
-    (task) => task.status === "Done"
+    (task) => task.status === "Done",
   ).length;
 
-  const overdueTasks = tasks.filter(isOverdue).length;
+  const overdueTasks =
+    tasks.filter(isOverdue).length;
 
   const handleAddTask = async () => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create tasks.",
+        "error",
+      );
+      return;
+    }
+
     if (
       !newTask.title.trim() ||
       !newTask.projectId ||
@@ -301,20 +356,21 @@ export default function TasksPage() {
     ) {
       showToast(
         "Please fill in all required fields.",
-        "error"
+        "error",
       );
       return;
     }
 
     const selectedProject = projects.find(
       (project) =>
-        project.id === Number(newTask.projectId)
+        project.id ===
+        Number(newTask.projectId),
     );
 
     if (!selectedProject) {
       showToast(
         "Please select a valid project.",
-        "error"
+        "error",
       );
       return;
     }
@@ -322,16 +378,25 @@ export default function TasksPage() {
     try {
       const response = await createTask({
         title: newTask.title.trim(),
-        description: newTask.description.trim(),
+        description:
+          newTask.description.trim(),
         projectId: selectedProject.id,
-        status: toApiStatus(newTask.status),
+        status: toApiStatus(
+          newTask.status,
+        ),
         priority: newTask.priority,
-        dueDate: toIsoDate(newTask.dueDate),
+        dueDate: toIsoDate(
+          newTask.dueDate,
+        ),
       });
 
-      if (!response.success || !response.data) {
+      if (
+        !response.success ||
+        !response.data
+      ) {
         throw new Error(
-          response.message || "Failed to create task."
+          response.message ||
+            "Failed to create task.",
         );
       }
 
@@ -353,32 +418,48 @@ export default function TasksPage() {
 
       showToast(
         "Task created successfully.",
-        "success"
+        "success",
       );
     } catch (error) {
-      console.error("Failed to create task:", error);
+      console.error(
+        "Failed to create task:",
+        error,
+      );
 
       showToast(
         error instanceof Error
           ? error.message
           : "Failed to create task.",
-        "error"
+        "error",
       );
     }
   };
 
   const handleStatusChange = async (
     task: ApiTask,
-    status: TaskStatus
+    status: TaskStatus,
   ) => {
-    try {
-      const response = await updateTask(task.id, {
-        status: toApiStatus(status),
-      });
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update tasks.",
+        "error",
+      );
+      return;
+    }
 
-      if (!response.success || !response.data) {
+    try {
+      const response =
+        await updateTask(task.id, {
+          status: toApiStatus(status),
+        });
+
+      if (
+        !response.success ||
+        !response.data
+      ) {
         throw new Error(
-          response.message || "Failed to update task."
+          response.message ||
+            "Failed to update task.",
         );
       }
 
@@ -386,82 +467,58 @@ export default function TasksPage() {
         current.map((item) =>
           item.id === task.id
             ? response.data!
-            : item
-        )
+            : item,
+        ),
       );
 
       showToast(
         `${task.title} moved to ${status}.`,
-        "success"
+        "success",
       );
     } catch (error) {
-      console.error("Failed to update task status:", error);
+      console.error(
+        "Failed to update task status:",
+        error,
+      );
 
       showToast(
         error instanceof Error
           ? error.message
           : "Failed to update task.",
-        "error"
+        "error",
       );
     }
   };
 
-  const handlePriorityChange = async (
+  const handleDuplicate = async (
     task: ApiTask,
-    priority: TaskPriority
   ) => {
-    try {
-      const response = await updateTask(task.id, {
-        priority,
-      });
-
-      if (!response.success || !response.data) {
-        throw new Error(
-          response.message || "Failed to update priority."
-        );
-      }
-
-      setTasks((current) =>
-        current.map((item) =>
-          item.id === task.id
-            ? response.data!
-            : item
-        )
-      );
-
+    if (!canCreate) {
       showToast(
-        `${task.title} priority updated.`,
-        "success"
+        "You do not have permission to create tasks.",
+        "error",
       );
-    } catch (error) {
-      console.error(
-        "Failed to update task priority:",
-        error
-      );
-
-      showToast(
-        error instanceof Error
-          ? error.message
-          : "Failed to update priority.",
-        "error"
-      );
+      return;
     }
-  };
 
-  const handleDuplicate = async (task: ApiTask) => {
     try {
-      const response = await createTask({
-        title: `${task.title} - Copy`,
-        description: task.description,
-        projectId: task.projectId,
-        status: "ToDo",
-        priority: task.priority,
-        dueDate: task.dueDate,
-      });
+      const response =
+        await createTask({
+          title: `${task.title} - Copy`,
+          description: task.description,
+          projectId: task.projectId,
+          status: "ToDo",
+          priority: task.priority,
+          dueDate: task.dueDate,
+        });
 
-      if (!response.success || !response.data) {
+      if (
+        !response.success ||
+        !response.data
+      ) {
         throw new Error(
-          response.message || "Failed to duplicate task."
+          response.message ||
+            "Failed to duplicate task.",
         );
       }
 
@@ -474,36 +531,52 @@ export default function TasksPage() {
 
       showToast(
         "Task duplicated successfully.",
-        "success"
+        "success",
       );
     } catch (error) {
-      console.error("Failed to duplicate task:", error);
+      console.error(
+        "Failed to duplicate task:",
+        error,
+      );
 
       showToast(
         error instanceof Error
           ? error.message
           : "Failed to duplicate task.",
-        "error"
+        "error",
       );
     }
   };
 
   const handleDelete = async () => {
-    if (deleteId === null) return;
+    if (!canDelete) {
+      showToast(
+        "You do not have permission to delete tasks.",
+        "error",
+      );
+      return;
+    }
+
+    if (deleteId === null) {
+      return;
+    }
 
     try {
-      const response = await deleteTask(deleteId);
+      const response =
+        await deleteTask(deleteId);
 
       if (!response.success) {
         throw new Error(
-          response.message || "Failed to delete task."
+          response.message ||
+            "Failed to delete task.",
         );
       }
 
       setTasks((current) =>
         current.filter(
-          (task) => task.id !== deleteId
-        )
+          (task) =>
+            task.id !== deleteId,
+        ),
       );
 
       setDeleteId(null);
@@ -511,40 +584,63 @@ export default function TasksPage() {
 
       showToast(
         "Task deleted successfully.",
-        "success"
+        "success",
       );
     } catch (error) {
-      console.error("Failed to delete task:", error);
+      console.error(
+        "Failed to delete task:",
+        error,
+      );
 
       showToast(
         error instanceof Error
           ? error.message
           : "Failed to delete task.",
-        "error"
+        "error",
       );
     }
   };
 
   const moveTask = async (
     task: ApiTask,
-    direction: "next" | "previous"
+    direction: "next" | "previous",
   ) => {
-    const currentStatus = fromApiStatus(task.status);
-    const currentIndex = statuses.indexOf(currentStatus);
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update tasks.",
+        "error",
+      );
+      return;
+    }
+
+    const currentStatus =
+      fromApiStatus(task.status);
+
+    const currentIndex =
+      statuses.indexOf(
+        currentStatus,
+      );
 
     const nextIndex =
       direction === "next"
         ? Math.min(
             statuses.length - 1,
-            currentIndex + 1
+            currentIndex + 1,
           )
-        : Math.max(0, currentIndex - 1);
+        : Math.max(
+            0,
+            currentIndex - 1,
+          );
 
-    if (nextIndex === currentIndex) return;
+    if (
+      nextIndex === currentIndex
+    ) {
+      return;
+    }
 
     await handleStatusChange(
       task,
-      statuses[nextIndex]
+      statuses[nextIndex],
     );
   };
 
@@ -569,13 +665,17 @@ export default function TasksPage() {
                 </p>
               </div>
 
-              <button
-                onClick={() => setAddOpen(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:shadow-xl"
-              >
-                <Plus className="h-4 w-4" />
-                New Task
-              </button>
+              {canCreate && (
+                <button
+                  onClick={() =>
+                    setAddOpen(true)
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                >
+                  <Plus className="h-4 w-4" />
+                  New Task
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -679,7 +779,9 @@ export default function TasksPage() {
                 <input
                   value={search}
                   onChange={(e) =>
-                    setSearch(e.target.value)
+                    setSearch(
+                      e.target.value,
+                    )
                   }
                   placeholder="Search tasks, projects or descriptions..."
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -689,7 +791,9 @@ export default function TasksPage() {
               <select
                 value={projectFilter}
                 onChange={(e) =>
-                  setProjectFilter(e.target.value)
+                  setProjectFilter(
+                    e.target.value,
+                  )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
               >
@@ -697,14 +801,16 @@ export default function TasksPage() {
                   All Projects
                 </option>
 
-                {projects.map((project) => (
-                  <option
-                    key={project.id}
-                    value={project.name}
-                  >
-                    {project.name}
-                  </option>
-                ))}
+                {projects.map(
+                  (project) => (
+                    <option
+                      key={project.id}
+                      value={project.name}
+                    >
+                      {project.name}
+                    </option>
+                  ),
+                )}
               </select>
 
               <select
@@ -713,7 +819,7 @@ export default function TasksPage() {
                   setPriorityFilter(
                     e.target.value as
                       | "All"
-                      | TaskPriority
+                      | TaskPriority,
                   )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -722,262 +828,304 @@ export default function TasksPage() {
                   All Priorities
                 </option>
 
-                {priorities.map((priority) => (
-                  <option
-                    key={priority}
-                    value={priority}
-                  >
-                    {priority}
-                  </option>
-                ))}
+                {priorities.map(
+                  (priority) => (
+                    <option
+                      key={priority}
+                      value={priority}
+                    >
+                      {priority}
+                    </option>
+                  ),
+                )}
               </select>
             </div>
           </div>
 
           {loading ? (
             <div className="grid min-w-[1250px] grid-cols-4 gap-5 overflow-x-auto">
-              {statuses.map((status) => (
-                <div
-                  key={status}
-                  className="min-h-[520px] animate-pulse rounded-3xl border border-slate-200 bg-slate-100 p-3"
-                >
-                  <div className="mb-3 h-20 rounded-2xl bg-white" />
-                  <div className="space-y-3">
-                    <div className="h-48 rounded-2xl bg-white" />
-                    <div className="h-48 rounded-2xl bg-white" />
+              {statuses.map(
+                (status) => (
+                  <div
+                    key={status}
+                    className="min-h-[520px] animate-pulse rounded-3xl border border-slate-200 bg-slate-100 p-3"
+                  >
+                    <div className="mb-3 h-20 rounded-2xl bg-white" />
+
+                    <div className="space-y-3">
+                      <div className="h-48 rounded-2xl bg-white" />
+                      <div className="h-48 rounded-2xl bg-white" />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ),
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto pb-3">
               <div className="grid min-w-[1250px] grid-cols-4 gap-5">
-                {statuses.map((status) => {
-                  const columnTasks =
-                    filteredTasks.filter(
-                      (task) =>
-                        fromApiStatus(task.status) ===
-                        status
-                    );
+                {statuses.map(
+                  (status) => {
+                    const columnTasks =
+                      filteredTasks.filter(
+                        (task) =>
+                          fromApiStatus(
+                            task.status,
+                          ) === status,
+                      );
 
-                  return (
-                    <div
-                      key={status}
-                      className="min-h-[520px] rounded-3xl border border-slate-200 bg-slate-100/70 p-3"
-                    >
-                      <div className="mb-3 rounded-2xl bg-white p-4 shadow-sm">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={`rounded-lg p-2 ${
-                                status === "To Do"
-                                  ? "bg-slate-100 text-slate-600"
-                                  : status ===
-                                    "In Progress"
-                                  ? "bg-blue-100 text-blue-600"
-                                  : status === "Review"
-                                  ? "bg-violet-100 text-violet-600"
-                                  : "bg-emerald-100 text-emerald-600"
-                              }`}
-                            >
-                              {getStatusIcon(status)}
-                            </div>
-
-                            <div>
-                              <h2 className="text-sm font-bold text-slate-900">
-                                {status}
-                              </h2>
-
-                              <p className="text-[10px] text-slate-400">
-                                {columnTasks.length} tasks
-                              </p>
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() =>
-                              setAddOpen(true)
-                            }
-                            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        {columnTasks.map((task) => (
-                          <div
-                            key={task.id}
-                            className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <span
-                                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${getPriorityStyle(
-                                  task.priority
-                                )}`}
-                              >
-                                {getPriorityIcon(
-                                  task.priority
-                                )}
-                                {task.priority}
-                              </span>
-
-                              <div className="relative">
-                                <button
-                                  onClick={() =>
-                                    setMenuId(
-                                      menuId ===
-                                        task.id
-                                        ? null
-                                        : task.id
-                                    )
-                                  }
-                                  className="rounded-lg p-1.5 text-slate-300 opacity-0 transition group-hover:opacity-100 hover:bg-slate-100 hover:text-slate-700"
-                                >
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </button>
-
-                                {menuId === task.id && (
-                                  <div className="absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                                    <button
-                                      onClick={() => {
-                                        setMenuId(
-                                          null
-                                        );
-
-                                        showToast(
-                                          "Task details will be available next.",
-                                          "info"
-                                        );
-                                      }}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                    >
-                                      <Eye className="h-3.5 w-3.5" />
-                                      View Task
-                                    </button>
-
-                                    <button
-                                      onClick={() =>
-                                        handleDuplicate(
-                                          task
-                                        )
-                                      }
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                    >
-                                      <Copy className="h-3.5 w-3.5" />
-                                      Duplicate
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setDeleteId(
-                                          task.id
-                                        );
-                                        setMenuId(null);
-                                      }}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      Delete
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <h3 className="mt-3 line-clamp-2 text-sm font-bold leading-5 text-slate-900">
-                              {task.title}
-                            </h3>
-
-                            <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">
-                              {task.description ||
-                                "No description added."}
-                            </p>
-
-                            <div className="mt-4 flex items-center gap-2">
+                    return (
+                      <div
+                        key={status}
+                        className="min-h-[520px] rounded-3xl border border-slate-200 bg-slate-100/70 p-3"
+                      >
+                        <div className="mb-3 rounded-2xl bg-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
                               <div
-                                className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${getProjectGradient(
-                                  task.projectName
-                                )} text-white`}
-                              >
-                                <BriefcaseBusiness className="h-3.5 w-3.5" />
-                              </div>
-
-                              <span className="truncate text-[11px] font-semibold text-slate-600">
-                                {task.projectName}
-                              </span>
-                            </div>
-
-                            <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-                              <div
-                                className={`flex items-center gap-1.5 text-[10px] font-semibold ${
-                                  isOverdue(task)
-                                    ? "text-rose-600"
-                                    : "text-slate-400"
+                                className={`rounded-lg p-2 ${
+                                  status ===
+                                  "To Do"
+                                    ? "bg-slate-100 text-slate-600"
+                                    : status ===
+                                      "In Progress"
+                                      ? "bg-blue-100 text-blue-600"
+                                      : status ===
+                                        "Review"
+                                        ? "bg-violet-100 text-violet-600"
+                                        : "bg-emerald-100 text-emerald-600"
                                 }`}
                               >
-                                <CalendarDays className="h-3.5 w-3.5" />
-
-                                {formatDate(
-                                  task.dueDate
-                                )}
-
-                                {isOverdue(task) && (
-                                  <span className="font-bold">
-                                    Overdue
-                                  </span>
+                                {getStatusIcon(
+                                  status,
                                 )}
                               </div>
 
-                              <div className="flex items-center gap-1">
-                                {status !== "To Do" && (
-                                  <button
-                                    onClick={() =>
-                                      moveTask(
-                                        task,
-                                        "previous"
-                                      )
-                                    }
-                                    className="rounded-lg p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
-                                    title="Move back"
-                                  >
-                                    <ArrowRight className="h-3.5 w-3.5 rotate-180" />
-                                  </button>
-                                )}
+                              <div>
+                                <h2 className="text-sm font-bold text-slate-900">
+                                  {status}
+                                </h2>
 
-                                {status !== "Done" && (
-                                  <button
-                                    onClick={() =>
-                                      moveTask(
-                                        task,
-                                        "next"
-                                      )
-                                    }
-                                    className="rounded-lg p-1.5 text-slate-300 hover:bg-blue-50 hover:text-blue-600"
-                                    title="Move forward"
-                                  >
-                                    <ArrowRight className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
+                                <p className="text-[10px] text-slate-400">
+                                  {
+                                    columnTasks.length
+                                  }{" "}
+                                  tasks
+                                </p>
                               </div>
                             </div>
-                          </div>
-                        ))}
 
-                        {columnTasks.length === 0 && (
-                          <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 p-8 text-center">
-                            <CircleDot className="mx-auto h-6 w-6 text-slate-300" />
-
-                            <p className="mt-2 text-xs font-semibold text-slate-400">
-                              No tasks here
-                            </p>
+                            {canCreate && (
+                              <button
+                                onClick={() =>
+                                  setAddOpen(
+                                    true,
+                                  )
+                                }
+                                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
-                        )}
+                        </div>
+
+                        <div className="space-y-3">
+                          {columnTasks.map(
+                            (task) => (
+                              <div
+                                key={task.id}
+                                className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <span
+                                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${getPriorityStyle(
+                                      task.priority,
+                                    )}`}
+                                  >
+                                    {getPriorityIcon(
+                                      task.priority,
+                                    )}
+
+                                    {
+                                      task.priority
+                                    }
+                                  </span>
+
+                                  <div className="relative">
+                                    <button
+                                      onClick={() =>
+                                        setMenuId(
+                                          menuId ===
+                                            task.id
+                                            ? null
+                                            : task.id,
+                                        )
+                                      }
+                                      className="rounded-lg p-1.5 text-slate-300 opacity-0 transition group-hover:opacity-100 hover:bg-slate-100 hover:text-slate-700"
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </button>
+
+                                    {menuId ===
+                                      task.id && (
+                                      <div className="absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                                        <button
+                                          onClick={() => {
+                                            setMenuId(
+                                              null,
+                                            );
+
+                                            showToast(
+                                              "Task details will be available next.",
+                                              "info",
+                                            );
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                        >
+                                          <Eye className="h-3.5 w-3.5" />
+                                          View Task
+                                        </button>
+
+                                        {canCreate && (
+                                          <button
+                                            onClick={() =>
+                                              handleDuplicate(
+                                                task,
+                                              )
+                                            }
+                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                          >
+                                            <Copy className="h-3.5 w-3.5" />
+                                            Duplicate
+                                          </button>
+                                        )}
+
+                                        {canDelete && (
+                                          <button
+                                            onClick={() => {
+                                              setDeleteId(
+                                                task.id,
+                                              );
+                                              setMenuId(
+                                                null,
+                                              );
+                                            }}
+                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                            Delete
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <h3 className="mt-3 line-clamp-2 text-sm font-bold leading-5 text-slate-900">
+                                  {task.title}
+                                </h3>
+
+                                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">
+                                  {task.description ||
+                                    "No description added."}
+                                </p>
+
+                                <div className="mt-4 flex items-center gap-2">
+                                  <div
+                                    className={`flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br ${getProjectGradient(
+                                      task.projectName,
+                                    )} text-white`}
+                                  >
+                                    <BriefcaseBusiness className="h-3.5 w-3.5" />
+                                  </div>
+
+                                  <span className="truncate text-[11px] font-semibold text-slate-600">
+                                    {
+                                      task.projectName
+                                    }
+                                  </span>
+                                </div>
+
+                                <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+                                  <div
+                                    className={`flex items-center gap-1.5 text-[10px] font-semibold ${
+                                      isOverdue(
+                                        task,
+                                      )
+                                        ? "text-rose-600"
+                                        : "text-slate-400"
+                                    }`}
+                                  >
+                                    <CalendarDays className="h-3.5 w-3.5" />
+
+                                    {formatDate(
+                                      task.dueDate,
+                                    )}
+
+                                    {isOverdue(
+                                      task,
+                                    ) && (
+                                      <span className="font-bold">
+                                        Overdue
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {canUpdate && (
+                                    <div className="flex items-center gap-1">
+                                      {status !==
+                                        "To Do" && (
+                                        <button
+                                          onClick={() =>
+                                            moveTask(
+                                              task,
+                                              "previous",
+                                            )
+                                          }
+                                          className="rounded-lg p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                                          title="Move back"
+                                        >
+                                          <ArrowRight className="h-3.5 w-3.5 rotate-180" />
+                                        </button>
+                                      )}
+
+                                      {status !==
+                                        "Done" && (
+                                        <button
+                                          onClick={() =>
+                                            moveTask(
+                                              task,
+                                              "next",
+                                            )
+                                          }
+                                          className="rounded-lg p-1.5 text-slate-300 hover:bg-blue-50 hover:text-blue-600"
+                                          title="Move forward"
+                                        >
+                                          <ArrowRight className="h-3.5 w-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ),
+                          )}
+
+                          {columnTasks.length ===
+                            0 && (
+                            <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 p-8 text-center">
+                              <CircleDot className="mx-auto h-6 w-6 text-slate-300" />
+
+                              <p className="mt-2 text-xs font-semibold text-slate-400">
+                                No tasks here
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  },
+                )}
               </div>
             </div>
           )}
@@ -1011,7 +1159,7 @@ export default function TasksPage() {
           </div>
         </main>
 
-        {addOpen && (
+        {addOpen && canCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
               <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-6 py-5 text-white">
@@ -1082,14 +1230,16 @@ export default function TasksPage() {
                         Select project
                       </option>
 
-                      {projects.map((project) => (
-                        <option
-                          key={project.id}
-                          value={project.id}
-                        >
-                          {project.name}
-                        </option>
-                      ))}
+                      {projects.map(
+                        (project) => (
+                          <option
+                            key={project.id}
+                            value={project.id}
+                          >
+                            {project.name}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </div>
 
@@ -1099,7 +1249,9 @@ export default function TasksPage() {
                     </label>
 
                     <select
-                      value={newTask.priority}
+                      value={
+                        newTask.priority
+                      }
                       onChange={(e) =>
                         setNewTask({
                           ...newTask,
@@ -1117,7 +1269,7 @@ export default function TasksPage() {
                           >
                             {priority}
                           </option>
-                        )
+                        ),
                       )}
                     </select>
                   </div>
@@ -1128,7 +1280,9 @@ export default function TasksPage() {
                     </label>
 
                     <select
-                      value={newTask.status}
+                      value={
+                        newTask.status
+                      }
                       onChange={(e) =>
                         setNewTask({
                           ...newTask,
@@ -1138,14 +1292,16 @@ export default function TasksPage() {
                       }
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                     >
-                      {statuses.map((status) => (
-                        <option
-                          key={status}
-                          value={status}
-                        >
-                          {status}
-                        </option>
-                      ))}
+                      {statuses.map(
+                        (status) => (
+                          <option
+                            key={status}
+                            value={status}
+                          >
+                            {status}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </div>
 
@@ -1156,7 +1312,9 @@ export default function TasksPage() {
 
                     <input
                       type="date"
-                      value={newTask.dueDate}
+                      value={
+                        newTask.dueDate
+                      }
                       onChange={(e) =>
                         setNewTask({
                           ...newTask,
@@ -1175,7 +1333,9 @@ export default function TasksPage() {
 
                     <textarea
                       rows={4}
-                      value={newTask.description}
+                      value={
+                        newTask.description
+                      }
                       onChange={(e) =>
                         setNewTask({
                           ...newTask,
@@ -1211,41 +1371,44 @@ export default function TasksPage() {
           </div>
         )}
 
-        {deleteId !== null && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
-                <Trash2 className="h-5 w-5" />
-              </div>
+        {deleteId !== null &&
+          canDelete && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                  <Trash2 className="h-5 w-5" />
+                </div>
 
-              <h2 className="mt-5 text-lg font-bold text-slate-900">
-                Delete this task?
-              </h2>
+                <h2 className="mt-5 text-lg font-bold text-slate-900">
+                  Delete this task?
+                </h2>
 
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                This task will be permanently removed from your workspace.
-              </p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  This task will be permanently removed from your workspace.
+                </p>
 
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  onClick={() =>
-                    setDeleteId(null)
-                  }
-                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button
+                    onClick={() =>
+                      setDeleteId(
+                        null,
+                      )
+                    }
+                    className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
 
-                <button
-                  onClick={handleDelete}
-                  className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
-                >
-                  Delete Task
-                </button>
+                  <button
+                    onClick={handleDelete}
+                    className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
+                  >
+                    Delete Task
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
       </div>
     </AppShell>
   );

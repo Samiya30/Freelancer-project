@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 import {
   getPayments,
   createPayment,
@@ -92,15 +93,6 @@ function formatDate(value: string) {
   return date.toISOString().split("T")[0];
 }
 
-function getInitials(name: string) {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 function getAvatarGradient(name: string) {
   const gradients = [
     "from-violet-500 to-fuchsia-500",
@@ -111,8 +103,12 @@ function getAvatarGradient(name: string) {
   ];
 
   const index =
-    name.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) %
-    gradients.length;
+    name
+      .split("")
+      .reduce(
+        (sum, char) => sum + char.charCodeAt(0),
+        0
+      ) % gradients.length;
 
   return gradients[index];
 }
@@ -188,6 +184,12 @@ function toUiPayment(payment: ApiPayment): UiPayment {
 
 export default function PaymentsPage() {
   const { showToast } = useToast();
+  const { hasPermission } = useAuth();
+
+  const canCreate = hasPermission("payments.create");
+  const canUpdate = hasPermission("payments.update");
+  const canDelete = hasPermission("payments.delete");
+  const canExport = hasPermission("payments.export");
 
   const [payments, setPayments] = useState<UiPayment[]>([]);
   const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
@@ -199,6 +201,7 @@ export default function PaymentsPage() {
   const [statusFilter, setStatusFilter] = useState<
     "All" | PaymentStatus
   >("All");
+
   const [methodFilter, setMethodFilter] = useState<
     "All" | PaymentMethod
   >("All");
@@ -278,7 +281,11 @@ export default function PaymentsPage() {
         methodFilter === "All" ||
         payment.method === methodFilter;
 
-      return matchesSearch && matchesStatus && matchesMethod;
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesMethod
+      );
     });
   }, [
     payments,
@@ -307,18 +314,18 @@ export default function PaymentsPage() {
     );
 
     if (!invoice) {
-      setNewPayment({
-        ...newPayment,
+      setNewPayment((current) => ({
+        ...current,
         invoiceNumber,
-      });
+      }));
       return;
     }
 
-    setNewPayment({
-      ...newPayment,
+    setNewPayment((current) => ({
+      ...current,
       invoiceNumber,
       amount: String(invoice.amount),
-    });
+    }));
   };
 
   const generatePaymentNumber = () => {
@@ -330,12 +337,23 @@ export default function PaymentsPage() {
   };
 
   const handleAddPayment = async () => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create payments.",
+        "error"
+      );
+      return;
+    }
+
     if (
       !newPayment.invoiceNumber ||
       !newPayment.amount ||
       !newPayment.date
     ) {
-      showToast("Please complete all required fields.", "error");
+      showToast(
+        "Please complete all required fields.",
+        "error"
+      );
       return;
     }
 
@@ -344,14 +362,20 @@ export default function PaymentsPage() {
     );
 
     if (!invoice) {
-      showToast("Please select a valid invoice.", "error");
+      showToast(
+        "Please select a valid invoice.",
+        "error"
+      );
       return;
     }
 
     const amount = Number(newPayment.amount);
 
     if (!Number.isFinite(amount) || amount < 0) {
-      showToast("Please enter a valid payment amount.", "error");
+      showToast(
+        "Please enter a valid payment amount.",
+        "error"
+      );
       return;
     }
 
@@ -372,12 +396,17 @@ export default function PaymentsPage() {
         projectId: invoice.projectId,
       });
 
-      if (response.data) {
-        setPayments((current) => [
-          toUiPayment(response.data!),
-          ...current,
-        ]);
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to record payment."
+        );
       }
+
+      setPayments((current) => [
+        toUiPayment(response.data!),
+        ...current,
+      ]);
 
       setNewPayment({
         invoiceNumber: "",
@@ -389,9 +418,15 @@ export default function PaymentsPage() {
 
       setAddOpen(false);
 
-      showToast("Payment recorded successfully.", "success");
+      showToast(
+        "Payment recorded successfully.",
+        "success"
+      );
     } catch (error) {
-      console.error("Failed to create payment:", error);
+      console.error(
+        "Failed to create payment:",
+        error
+      );
 
       showToast(
         error instanceof Error
@@ -408,6 +443,16 @@ export default function PaymentsPage() {
     payment: UiPayment,
     status: PaymentStatus
   ) => {
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update payments.",
+        "error"
+      );
+      return;
+    }
+
+    if (payment.status === status) return;
+
     try {
       setSaving(true);
 
@@ -415,22 +460,34 @@ export default function PaymentsPage() {
         status: mapUiStatusToApi(status),
       });
 
-      if (response.data) {
-        const updatedPayment = toUiPayment(response.data);
-
-        setPayments((current) =>
-          current.map((item) =>
-            item.id === payment.id ? updatedPayment : item
-          )
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to update payment."
         );
       }
+
+      const updatedPayment = toUiPayment(
+        response.data
+      );
+
+      setPayments((current) =>
+        current.map((item) =>
+          item.id === payment.id
+            ? updatedPayment
+            : item
+        )
+      );
 
       showToast(
         `${payment.paymentNumber} updated to ${status}.`,
         "success"
       );
     } catch (error) {
-      console.error("Failed to update payment:", error);
+      console.error(
+        "Failed to update payment:",
+        error
+      );
 
       showToast(
         error instanceof Error
@@ -443,7 +500,17 @@ export default function PaymentsPage() {
     }
   };
 
-  const handleDuplicate = async (payment: UiPayment) => {
+  const handleDuplicate = async (
+    payment: UiPayment
+  ) => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create payments.",
+        "error"
+      );
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -461,18 +528,29 @@ export default function PaymentsPage() {
         projectId: payment.projectId,
       });
 
-      if (response.data) {
-        setPayments((current) => [
-          toUiPayment(response.data!),
-          ...current,
-        ]);
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message ||
+            "Failed to duplicate payment."
+        );
       }
+
+      setPayments((current) => [
+        toUiPayment(response.data!),
+        ...current,
+      ]);
 
       setMenuId(null);
 
-      showToast("Payment duplicated.", "success");
+      showToast(
+        "Payment duplicated.",
+        "success"
+      );
     } catch (error) {
-      console.error("Failed to duplicate payment:", error);
+      console.error(
+        "Failed to duplicate payment:",
+        error
+      );
 
       showToast(
         error instanceof Error
@@ -486,23 +564,46 @@ export default function PaymentsPage() {
   };
 
   const handleDelete = async () => {
+    if (!canDelete) {
+      showToast(
+        "You do not have permission to delete payments.",
+        "error"
+      );
+      return;
+    }
+
     if (deleteId === null) return;
 
     try {
       setSaving(true);
 
-      await deletePayment(deleteId);
+      const response = await deletePayment(deleteId);
+
+      if (!response.success) {
+        throw new Error(
+          response.message ||
+            "Failed to delete payment."
+        );
+      }
 
       setPayments((current) =>
-        current.filter((payment) => payment.id !== deleteId)
+        current.filter(
+          (payment) => payment.id !== deleteId
+        )
       );
 
       setDeleteId(null);
       setMenuId(null);
 
-      showToast("Payment deleted successfully.", "success");
+      showToast(
+        "Payment deleted successfully.",
+        "success"
+      );
     } catch (error) {
-      console.error("Failed to delete payment:", error);
+      console.error(
+        "Failed to delete payment:",
+        error
+      );
 
       showToast(
         error instanceof Error
@@ -516,6 +617,14 @@ export default function PaymentsPage() {
   };
 
   const handleExport = () => {
+    if (!canExport) {
+      showToast(
+        "You do not have permission to export payments.",
+        "error"
+      );
+      return;
+    }
+
     const headers = [
       "Payment",
       "Client",
@@ -561,7 +670,10 @@ export default function PaymentsPage() {
 
     URL.revokeObjectURL(url);
 
-    showToast("Payment CSV exported.", "success");
+    showToast(
+      "Payment CSV exported.",
+      "success"
+    );
   };
 
   return (
@@ -587,21 +699,25 @@ export default function PaymentsPage() {
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  onClick={handleExport}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                >
-                  <Download className="h-4 w-4" />
-                  Export
-                </button>
+                {canExport && (
+                  <button
+                    onClick={handleExport}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export
+                  </button>
+                )}
 
-                <button
-                  onClick={() => setAddOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition hover:-translate-y-0.5 hover:shadow-xl"
-                >
-                  <Plus className="h-4 w-4" />
-                  Record Payment
-                </button>
+                {canCreate && (
+                  <button
+                    onClick={() => setAddOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Record Payment
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -725,7 +841,8 @@ export default function PaymentsPage() {
 
                   <p className="mt-1 text-lg font-bold">
                     {payments.filter(
-                      (payment) => payment.status === "Completed"
+                      (payment) =>
+                        payment.status === "Completed"
                     ).length}
                   </p>
                 </div>
@@ -737,7 +854,8 @@ export default function PaymentsPage() {
 
                   <p className="mt-1 text-lg font-bold">
                     {payments.filter(
-                      (payment) => payment.status === "Pending"
+                      (payment) =>
+                        payment.status === "Pending"
                     ).length}
                   </p>
                 </div>
@@ -749,7 +867,8 @@ export default function PaymentsPage() {
 
                   <p className="mt-1 text-lg font-bold">
                     {payments.filter(
-                      (payment) => payment.status === "Failed"
+                      (payment) =>
+                        payment.status === "Failed"
                     ).length}
                   </p>
                 </div>
@@ -775,12 +894,16 @@ export default function PaymentsPage() {
                 value={statusFilter}
                 onChange={(e) =>
                   setStatusFilter(
-                    e.target.value as "All" | PaymentStatus
+                    e.target.value as
+                      | "All"
+                      | PaymentStatus
                   )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
               >
-                <option value="All">All Statuses</option>
+                <option value="All">
+                  All Statuses
+                </option>
 
                 {statuses.map((status) => (
                   <option key={status} value={status}>
@@ -793,12 +916,16 @@ export default function PaymentsPage() {
                 value={methodFilter}
                 onChange={(e) =>
                   setMethodFilter(
-                    e.target.value as "All" | PaymentMethod
+                    e.target.value as
+                      | "All"
+                      | PaymentMethod
                   )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
               >
-                <option value="All">All Methods</option>
+                <option value="All">
+                  All Methods
+                </option>
 
                 {methods.map((method) => (
                   <option key={method} value={method}>
@@ -836,6 +963,7 @@ export default function PaymentsPage() {
               {loading ? (
                 <div className="p-14 text-center">
                   <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-600" />
+
                   <p className="mt-4 text-sm font-semibold text-slate-600">
                     Loading payments...
                   </p>
@@ -925,47 +1053,58 @@ export default function PaymentsPage() {
                           </span>
                         </div>
 
-                        <div className="relative">
-                          <button
-                            onClick={() =>
-                              setMenuId(
-                                menuId === payment.id
-                                  ? null
-                                  : payment.id
-                              )
-                            }
-                            className="rounded-xl p-2.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
+                        {(canCreate ||
+                          canDelete) && (
+                          <div className="relative">
+                            <button
+                              onClick={() =>
+                                setMenuId(
+                                  menuId === payment.id
+                                    ? null
+                                    : payment.id
+                                )
+                              }
+                              className="rounded-xl p-2.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
 
-                          {menuId === payment.id && (
-                            <div className="absolute right-0 top-11 z-30 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                              <button
-                                onClick={() =>
-                                  handleDuplicate(payment)
-                                }
-                                disabled={saving}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                              >
-                                <Copy className="h-3.5 w-3.5" />
-                                Duplicate
-                              </button>
+                            {menuId === payment.id && (
+                              <div className="absolute right-0 top-11 z-30 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                                {canCreate && (
+                                  <button
+                                    onClick={() =>
+                                      handleDuplicate(
+                                        payment
+                                      )
+                                    }
+                                    disabled={saving}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Duplicate
+                                  </button>
+                                )}
 
-                              <button
-                                onClick={() => {
-                                  setDeleteId(payment.id);
-                                  setMenuId(null);
-                                }}
-                                disabled={saving}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                                {canDelete && (
+                                  <button
+                                    onClick={() => {
+                                      setDeleteId(
+                                        payment.id
+                                      );
+                                      setMenuId(null);
+                                    }}
+                                    disabled={saving}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="ml-[74px] mt-4 flex items-center justify-between">
@@ -979,31 +1118,38 @@ export default function PaymentsPage() {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-semibold text-slate-400">
-                            Status
-                          </span>
+                        {canUpdate && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-slate-400">
+                              Status
+                            </span>
 
-                          <select
-                            value={payment.status}
-                            disabled={saving}
-                            onChange={(e) =>
-                              handleStatusChange(
-                                payment,
-                                e.target.value as PaymentStatus
-                              )
-                            }
-                            className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-bold outline-none disabled:opacity-50 ${getStatusStyle(
-                              payment.status
-                            )}`}
-                          >
-                            {statuses.map((status) => (
-                              <option key={status} value={status}>
-                                {status}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                            <select
+                              value={payment.status}
+                              disabled={saving}
+                              onChange={(e) =>
+                                handleStatusChange(
+                                  payment,
+                                  e.target.value as PaymentStatus
+                                )
+                              }
+                              className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-bold outline-none disabled:opacity-50 ${getStatusStyle(
+                                payment.status
+                              )}`}
+                            >
+                              {statuses.map(
+                                (status) => (
+                                  <option
+                                    key={status}
+                                    value={status}
+                                  >
+                                    {status}
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1032,6 +1178,7 @@ export default function PaymentsPage() {
               {loading ? (
                 <div className="p-14 text-center">
                   <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-600" />
+
                   <p className="mt-4 text-sm font-semibold text-slate-600">
                     Loading payments...
                   </p>
@@ -1039,7 +1186,10 @@ export default function PaymentsPage() {
               ) : (
                 <>
                   {filteredPayments.map((payment) => (
-                    <div key={payment.id} className="p-4">
+                    <div
+                      key={payment.id}
+                      className="p-4"
+                    >
                       <div className="flex items-start gap-3">
                         <div
                           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${getAvatarGradient(
@@ -1065,21 +1215,62 @@ export default function PaymentsPage() {
                               </p>
                             </div>
 
-                            <button
-                              onClick={() =>
-                                setMenuId(
-                                  menuId === payment.id
-                                    ? null
-                                    : payment.id
-                                )
-                              }
-                              className="rounded-lg p-1.5 text-slate-400"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </button>
+                            {(canCreate ||
+                              canDelete) && (
+                              <button
+                                onClick={() =>
+                                  setMenuId(
+                                    menuId ===
+                                      payment.id
+                                      ? null
+                                      : payment.id
+                                  )
+                                }
+                                className="rounded-lg p-1.5 text-slate-400"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
+
+                      {(canCreate ||
+                        canDelete) &&
+                        menuId === payment.id && (
+                          <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                            {canCreate && (
+                              <button
+                                onClick={() =>
+                                  handleDuplicate(
+                                    payment
+                                  )
+                                }
+                                disabled={saving}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                                Duplicate
+                              </button>
+                            )}
+
+                            {canDelete && (
+                              <button
+                                onClick={() => {
+                                  setDeleteId(
+                                    payment.id
+                                  );
+                                  setMenuId(null);
+                                }}
+                                disabled={saving}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        )}
 
                       <div className="mt-4 grid grid-cols-2 gap-3">
                         <div className="rounded-xl bg-emerald-50 p-3">
@@ -1088,7 +1279,9 @@ export default function PaymentsPage() {
                           </p>
 
                           <p className="mt-1 text-sm font-bold text-emerald-900">
-                            {formatCurrency(payment.amount)}
+                            {formatCurrency(
+                              payment.amount
+                            )}
                           </p>
                         </div>
 
@@ -1104,32 +1297,64 @@ export default function PaymentsPage() {
                       </div>
 
                       <div className="mt-3 flex items-center justify-between">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${getStatusStyle(
-                            payment.status
-                          )}`}
-                        >
-                          {payment.status === "Completed" && (
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                          )}
+                        {canUpdate ? (
+                          <select
+                            value={payment.status}
+                            disabled={saving}
+                            onChange={(e) =>
+                              handleStatusChange(
+                                payment,
+                                e.target.value as PaymentStatus
+                              )
+                            }
+                            className={`rounded-full border px-3 py-1.5 text-xs font-bold outline-none disabled:opacity-50 ${getStatusStyle(
+                              payment.status
+                            )}`}
+                          >
+                            {statuses.map(
+                              (status) => (
+                                <option
+                                  key={status}
+                                  value={status}
+                                >
+                                  {status}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${getStatusStyle(
+                              payment.status
+                            )}`}
+                          >
+                            {payment.status ===
+                              "Completed" && (
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            )}
 
-                          {payment.status === "Pending" && (
-                            <Clock3 className="h-3.5 w-3.5" />
-                          )}
+                            {payment.status ===
+                              "Pending" && (
+                              <Clock3 className="h-3.5 w-3.5" />
+                            )}
 
-                          {payment.status === "Failed" && (
-                            <AlertCircle className="h-3.5 w-3.5" />
-                          )}
+                            {payment.status ===
+                              "Failed" && (
+                              <AlertCircle className="h-3.5 w-3.5" />
+                            )}
 
-                          {payment.status}
-                        </span>
+                            {payment.status}
+                          </span>
+                        )}
 
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold ${getMethodStyle(
                             payment.method
                           )}`}
                         >
-                          {getMethodIcon(payment.method)}
+                          {getMethodIcon(
+                            payment.method
+                          )}
                           {payment.method}
                         </span>
                       </div>
@@ -1187,7 +1412,7 @@ export default function PaymentsPage() {
         </main>
 
         {/* Add Payment Modal */}
-        {addOpen && (
+        {addOpen && canCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-xl overflow-hidden rounded-3xl bg-white shadow-2xl">
               <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-6 py-5 text-white">
@@ -1225,19 +1450,26 @@ export default function PaymentsPage() {
                   <select
                     value={newPayment.invoiceNumber}
                     onChange={(e) =>
-                      handleInvoiceChange(e.target.value)
+                      handleInvoiceChange(
+                        e.target.value
+                      )
                     }
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
                   >
-                    <option value="">Select invoice</option>
+                    <option value="">
+                      Select invoice
+                    </option>
 
                     {invoices.map((invoice) => (
                       <option
                         key={invoice.id}
                         value={invoice.number}
                       >
-                        {invoice.number} — {invoice.client} —{" "}
-                        {formatCurrency(invoice.amount)}
+                        {invoice.number} —{" "}
+                        {invoice.client} —{" "}
+                        {formatCurrency(
+                          invoice.amount
+                        )}
                       </option>
                     ))}
                   </select>
@@ -1257,10 +1489,13 @@ export default function PaymentsPage() {
                         min="0"
                         value={newPayment.amount}
                         onChange={(e) =>
-                          setNewPayment({
-                            ...newPayment,
-                            amount: e.target.value,
-                          })
+                          setNewPayment(
+                            (current) => ({
+                              ...current,
+                              amount:
+                                e.target.value,
+                            })
+                          )
                         }
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-9 pr-4 text-sm outline-none focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
                       />
@@ -1276,10 +1511,12 @@ export default function PaymentsPage() {
                       type="date"
                       value={newPayment.date}
                       onChange={(e) =>
-                        setNewPayment({
-                          ...newPayment,
-                          date: e.target.value,
-                        })
+                        setNewPayment(
+                          (current) => ({
+                            ...current,
+                            date: e.target.value,
+                          })
+                        )
                       }
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
                     />
@@ -1293,15 +1530,21 @@ export default function PaymentsPage() {
                     <select
                       value={newPayment.method}
                       onChange={(e) =>
-                        setNewPayment({
-                          ...newPayment,
-                          method: e.target.value as PaymentMethod,
-                        })
+                        setNewPayment(
+                          (current) => ({
+                            ...current,
+                            method:
+                              e.target.value as PaymentMethod,
+                          })
+                        )
                       }
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
                     >
                       {methods.map((method) => (
-                        <option key={method} value={method}>
+                        <option
+                          key={method}
+                          value={method}
+                        >
                           {method}
                         </option>
                       ))}
@@ -1316,15 +1559,21 @@ export default function PaymentsPage() {
                     <select
                       value={newPayment.status}
                       onChange={(e) =>
-                        setNewPayment({
-                          ...newPayment,
-                          status: e.target.value as PaymentStatus,
-                        })
+                        setNewPayment(
+                          (current) => ({
+                            ...current,
+                            status:
+                              e.target.value as PaymentStatus,
+                          })
+                        )
                       }
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
                     >
                       {statuses.map((status) => (
-                        <option key={status} value={status}>
+                        <option
+                          key={status}
+                          value={status}
+                        >
                           {status}
                         </option>
                       ))}
@@ -1354,7 +1603,8 @@ export default function PaymentsPage() {
                 <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
                   <button
                     onClick={() => setAddOpen(false)}
-                    className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                    disabled={saving}
+                    className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                   >
                     Cancel
                   </button>
@@ -1364,7 +1614,9 @@ export default function PaymentsPage() {
                     disabled={saving}
                     className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {saving ? "Saving..." : "Record Payment"}
+                    {saving
+                      ? "Saving..."
+                      : "Record Payment"}
                   </button>
                 </div>
               </div>
@@ -1373,7 +1625,7 @@ export default function PaymentsPage() {
         )}
 
         {/* Delete Modal */}
-        {deleteId !== null && (
+        {deleteId !== null && canDelete && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
@@ -1392,7 +1644,8 @@ export default function PaymentsPage() {
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   onClick={() => setDeleteId(null)}
-                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  disabled={saving}
+                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1402,7 +1655,9 @@ export default function PaymentsPage() {
                   disabled={saving}
                   className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
                 >
-                  {saving ? "Deleting..." : "Delete Payment"}
+                  {saving
+                    ? "Deleting..."
+                    : "Delete Payment"}
                 </button>
               </div>
             </div>

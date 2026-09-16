@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 import type { ApiTimeEntry } from "@/lib/api/time";
 import {
@@ -75,41 +76,63 @@ function getProjectGradient(project: string) {
   ];
 
   const index =
-    project.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) %
-    gradients.length;
+    project.split("").reduce(
+      (sum, char) =>
+        sum + char.charCodeAt(0),
+      0,
+    ) % gradients.length;
 
   return gradients[index];
 }
 
 export default function TimePage() {
-  const [timeEntries, setTimeEntries] = useState<ApiTimeEntry[]>([]);
-  const [projects, setProjects] = useState<ApiProject[]>([]);
-  const [tasks, setTasks] = useState<ApiTask[]>([]);
-  const [loading, setLoading] = useState(true);
-
   const { showToast } = useToast();
+  const { hasPermission } = useAuth();
 
-  const [search, setSearch] = useState("");
-  const [projectFilter, setProjectFilter] = useState("All");
-  const [dateFilter, setDateFilter] = useState("");
+  const canCreate = hasPermission("time.create");
+  const canDelete = hasPermission("time.delete");
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [menuId, setMenuId] = useState<number | null>(null);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [timeEntries, setTimeEntries] =
+    useState<ApiTimeEntry[]>([]);
+  const [projects, setProjects] =
+    useState<ApiProject[]>([]);
+  const [tasks, setTasks] =
+    useState<ApiTask[]>([]);
+  const [loading, setLoading] =
+    useState(true);
 
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [search, setSearch] =
+    useState("");
+  const [projectFilter, setProjectFilter] =
+    useState("All");
+  const [dateFilter, setDateFilter] =
+    useState("");
 
-  const [newEntry, setNewEntry] = useState({
-    description: "",
-    projectId: "",
-    taskId: "",
-    date: new Date().toISOString().split("T")[0],
-    hours: "",
-    minutes: "",
-    billable: true,
-    hourlyRate: "1500",
-  });
+  const [addOpen, setAddOpen] =
+    useState(false);
+  const [menuId, setMenuId] =
+    useState<number | null>(null);
+  const [deleteId, setDeleteId] =
+    useState<number | null>(null);
+
+  const [timerRunning, setTimerRunning] =
+    useState(false);
+  const [timerSeconds, setTimerSeconds] =
+    useState(0);
+
+  const [newEntry, setNewEntry] =
+    useState({
+      description: "",
+      projectId: "",
+      taskId: "",
+      date: new Date()
+        .toISOString()
+        .split("T")[0],
+      hours: "",
+      minutes: "",
+      billable: true,
+      hourlyRate: "1500",
+    });
 
   useEffect(() => {
     let cancelled = false;
@@ -118,27 +141,57 @@ export default function TimePage() {
       try {
         setLoading(true);
 
-        const [timeResponse, projectsResponse, tasksResponse] =
-          await Promise.all([
-            getTimeEntries(),
-            getProjects(),
-            getTasks(),
-          ]);
+        const [
+          timeResponse,
+          projectsResponse,
+          tasksResponse,
+        ] = await Promise.all([
+          getTimeEntries(),
+          getProjects(),
+          getTasks(),
+        ]);
 
         if (cancelled) {
           return;
         }
 
-        setTimeEntries(timeResponse.data ?? []);
-        setProjects(projectsResponse.data ?? []);
-        setTasks(tasksResponse.data ?? []);
+        if (!timeResponse.success) {
+          throw new Error(
+            timeResponse.message ||
+              "Failed to load time entries.",
+          );
+        }
+
+        if (!projectsResponse.success) {
+          throw new Error(
+            projectsResponse.message ||
+              "Failed to load projects.",
+          );
+        }
+
+        if (!tasksResponse.success) {
+          throw new Error(
+            tasksResponse.message ||
+              "Failed to load tasks.",
+          );
+        }
+
+        setTimeEntries(
+          timeResponse.data ?? [],
+        );
+        setProjects(
+          projectsResponse.data ?? [],
+        );
+        setTasks(
+          tasksResponse.data ?? [],
+        );
       } catch (error) {
         if (!cancelled) {
           showToast(
             error instanceof Error
               ? error.message
               : "Failed to load time tracking data.",
-            "error"
+            "error",
           );
         }
       } finally {
@@ -161,311 +214,527 @@ export default function TimePage() {
     }
 
     const interval = setInterval(() => {
-      setTimerSeconds((seconds) => seconds + 1);
+      setTimerSeconds(
+        (seconds) => seconds + 1,
+      );
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () =>
+      clearInterval(interval);
   }, [timerRunning]);
 
-  const filteredEntries = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  const filteredEntries =
+    useMemo(() => {
+      const query =
+        search.trim().toLowerCase();
 
-    return timeEntries.filter((entry) => {
-      const matchesSearch =
-        !query ||
-        entry.description.toLowerCase().includes(query) ||
-        entry.projectName.toLowerCase().includes(query) ||
-        entry.taskName?.toLowerCase().includes(query);
+      return timeEntries.filter(
+        (entry) => {
+          const matchesSearch =
+            !query ||
+            entry.description
+              .toLowerCase()
+              .includes(query) ||
+            entry.projectName
+              .toLowerCase()
+              .includes(query) ||
+            entry.taskName
+              ?.toLowerCase()
+              .includes(query);
 
-      const matchesProject =
-        projectFilter === "All" ||
-        entry.projectName === projectFilter;
+          const matchesProject =
+            projectFilter === "All" ||
+            entry.projectName ===
+              projectFilter;
 
-      const matchesDate =
-        !dateFilter ||
-        toDateInputValue(entry.date) === dateFilter;
+          const matchesDate =
+            !dateFilter ||
+            toDateInputValue(
+              entry.date,
+            ) === dateFilter;
 
-      return matchesSearch && matchesProject && matchesDate;
-    });
-  }, [timeEntries, search, projectFilter, dateFilter]);
+          return (
+            matchesSearch &&
+            matchesProject &&
+            matchesDate
+          );
+        },
+      );
+    }, [
+      timeEntries,
+      search,
+      projectFilter,
+      dateFilter,
+    ]);
 
-  const totalMinutes = timeEntries.reduce(
-    (sum, entry) => sum + entry.duration,
-    0
-  );
-
-  const billableMinutes = timeEntries
-    .filter((entry) => entry.billable)
-    .reduce((sum, entry) => sum + entry.duration, 0);
-
-  const totalValue = timeEntries
-    .filter((entry) => entry.billable)
-    .reduce(
+  const totalMinutes =
+    timeEntries.reduce(
       (sum, entry) =>
-        sum + (entry.duration / 60) * entry.hourlyRate,
-      0
+        sum + entry.duration,
+      0,
     );
+
+  const billableMinutes =
+    timeEntries
+      .filter(
+        (entry) => entry.billable,
+      )
+      .reduce(
+        (sum, entry) =>
+          sum + entry.duration,
+        0,
+      );
+
+  const totalValue =
+    timeEntries
+      .filter(
+        (entry) => entry.billable,
+      )
+      .reduce(
+        (sum, entry) =>
+          sum +
+          (entry.duration / 60) *
+            entry.hourlyRate,
+        0,
+      );
 
   const billableRate =
     totalMinutes > 0
-      ? Math.round((billableMinutes / totalMinutes) * 100)
+      ? Math.round(
+          (billableMinutes /
+            totalMinutes) *
+            100,
+        )
       : 0;
 
-  const selectedProjectTasks = tasks.filter(
-    (task) => task.projectId === Number(newEntry.projectId)
-  );
+  const selectedProjectTasks =
+    tasks.filter(
+      (task) =>
+        task.projectId ===
+        Number(newEntry.projectId),
+    );
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date()
+    .toISOString()
+    .split("T")[0];
 
-  const todayMinutes = timeEntries
-    .filter((entry) => toDateInputValue(entry.date) === today)
-    .reduce((sum, entry) => sum + entry.duration, 0);
+  const todayMinutes =
+    timeEntries
+      .filter(
+        (entry) =>
+          toDateInputValue(
+            entry.date,
+          ) === today,
+      )
+      .reduce(
+        (sum, entry) =>
+          sum + entry.duration,
+        0,
+      );
 
   const handleStartTimer = () => {
+    if (!canCreate) {
+      showToast(
+        "You do not have permission to create time entries.",
+        "error",
+      );
+      return;
+    }
+
     if (timerRunning) {
       setTimerRunning(false);
-      showToast("Timer paused.", "info");
+
+      showToast(
+        "Timer paused.",
+        "info",
+      );
+
       return;
     }
 
     if (projects.length === 0) {
       showToast(
         "Create a project before starting a timer.",
-        "error"
+        "error",
       );
+
       return;
     }
 
     setTimerRunning(true);
-    showToast("Timer started.", "success");
-  };
 
-  const handleStopTimer = async () => {
-    if (timerSeconds === 0) {
-      setTimerRunning(false);
-      return;
-    }
-
-    const selectedProject =
-      projects.find(
-        (project) => project.id === Number(newEntry.projectId)
-      ) || projects[0];
-
-    if (!selectedProject) {
-      showToast(
-        "Create a project before starting a timer.",
-        "error"
-      );
-      setTimerRunning(false);
-      return;
-    }
-
-    const duration = Math.max(
-      1,
-      Math.round(timerSeconds / 60)
+    showToast(
+      "Timer started.",
+      "success",
     );
+  };
 
-    const taskId = newEntry.taskId
-      ? Number(newEntry.taskId)
-      : undefined;
-
-    try {
-      const response = await createTimeEntry({
-        description:
-          newEntry.description.trim() ||
-          "Tracked work session",
-        projectId: selectedProject.id,
-        taskId,
-        date: today,
-        duration,
-        billable: true,
-        hourlyRate:
-          Number(newEntry.hourlyRate) || 1500,
-      });
-
-      if (response.data) {
-        setTimeEntries((current) => [
-          response.data!,
-          ...current,
-        ]);
+  const handleStopTimer =
+    async () => {
+      if (!canCreate) {
+        showToast(
+          "You do not have permission to create time entries.",
+          "error",
+        );
+        return;
       }
 
-      setTimerSeconds(0);
-      setTimerRunning(false);
-
-      showToast(
-        `${formatDuration(duration)} saved to ${selectedProject.name}.`,
-        "success"
-      );
-    } catch (error) {
-      showToast(
-        error instanceof Error
-          ? error.message
-          : "Failed to save timer session.",
-        "error"
-      );
-    }
-  };
-
-  const handleAddEntry = async () => {
-    if (
-      !newEntry.description.trim() ||
-      !newEntry.projectId ||
-      !newEntry.date
-    ) {
-      showToast(
-        "Please fill in the required fields.",
-        "error"
-      );
-      return;
-    }
-
-    const hours = Number(newEntry.hours) || 0;
-    const minutes = Number(newEntry.minutes) || 0;
-    const duration = hours * 60 + minutes;
-
-    if (duration <= 0) {
-      showToast("Enter a valid duration.", "error");
-      return;
-    }
-
-    if (minutes < 0 || minutes > 59) {
-      showToast(
-        "Minutes must be between 0 and 59.",
-        "error"
-      );
-      return;
-    }
-
-    const selectedProject = projects.find(
-      (project) => project.id === Number(newEntry.projectId)
-    );
-
-    if (!selectedProject) {
-      showToast(
-        "Please select a valid project.",
-        "error"
-      );
-      return;
-    }
-
-    const selectedTask = newEntry.taskId
-      ? tasks.find(
-          (task) => task.id === Number(newEntry.taskId)
-        )
-      : undefined;
-
-    try {
-      const response = await createTimeEntry({
-        description: newEntry.description.trim(),
-        projectId: selectedProject.id,
-        taskId: selectedTask?.id,
-        date: newEntry.date,
-        duration,
-        billable: newEntry.billable,
-        hourlyRate:
-          Number(newEntry.hourlyRate) || 1500,
-      });
-
-      if (response.data) {
-        setTimeEntries((current) => [
-          response.data!,
-          ...current,
-        ]);
+      if (timerSeconds === 0) {
+        setTimerRunning(false);
+        return;
       }
 
-      setNewEntry({
-        description: "",
-        projectId: "",
-        taskId: "",
-        date: new Date().toISOString().split("T")[0],
-        hours: "",
-        minutes: "",
-        billable: true,
-        hourlyRate: "1500",
-      });
+      const selectedProject =
+        projects.find(
+          (project) =>
+            project.id ===
+            Number(
+              newEntry.projectId,
+            ),
+        ) || projects[0];
 
-      setAddOpen(false);
+      if (!selectedProject) {
+        showToast(
+          "Create a project before starting a timer.",
+          "error",
+        );
 
-      showToast(
-        "Time entry added successfully.",
-        "success"
-      );
-    } catch (error) {
-      showToast(
-        error instanceof Error
-          ? error.message
-          : "Failed to add time entry.",
-        "error"
-      );
-    }
-  };
-
-  const handleDuplicate = async (
-    entry: ApiTimeEntry
-  ) => {
-    try {
-      const response = await createTimeEntry({
-        description: `${entry.description} - Copy`,
-        projectId: entry.projectId,
-        taskId: entry.taskId ?? undefined,
-        date: toDateInputValue(entry.date),
-        duration: entry.duration,
-        billable: entry.billable,
-        hourlyRate: entry.hourlyRate,
-      });
-
-      if (response.data) {
-        setTimeEntries((current) => [
-          response.data!,
-          ...current,
-        ]);
+        setTimerRunning(false);
+        return;
       }
 
-      setMenuId(null);
+      const duration =
+        Math.max(
+          1,
+          Math.round(
+            timerSeconds / 60,
+          ),
+        );
 
-      showToast(
-        "Time entry duplicated.",
-        "success"
-      );
-    } catch (error) {
-      showToast(
-        error instanceof Error
-          ? error.message
-          : "Failed to duplicate time entry.",
-        "error"
-      );
-    }
-  };
+      const taskId =
+        newEntry.taskId
+          ? Number(
+              newEntry.taskId,
+            )
+          : undefined;
 
-  const handleDelete = async () => {
-    if (deleteId === null) {
-      return;
-    }
+      try {
+        const response =
+          await createTimeEntry({
+            description:
+              newEntry.description.trim() ||
+              "Tracked work session",
+            projectId:
+              selectedProject.id,
+            taskId,
+            date: today,
+            duration,
+            billable: true,
+            hourlyRate:
+              Number(
+                newEntry.hourlyRate,
+              ) || 1500,
+          });
 
-    try {
-      await deleteTimeEntry(deleteId);
+        if (
+          response.success &&
+          response.data
+        ) {
+          setTimeEntries(
+            (current) => [
+              response.data!,
+              ...current,
+            ],
+          );
+        } else {
+          throw new Error(
+            response.message ||
+              "Failed to save timer session.",
+          );
+        }
 
-      setTimeEntries((current) =>
-        current.filter((entry) => entry.id !== deleteId)
-      );
+        setTimerSeconds(0);
+        setTimerRunning(false);
 
-      setDeleteId(null);
-      setMenuId(null);
+        showToast(
+          `${formatDuration(
+            duration,
+          )} saved to ${selectedProject.name}.`,
+          "success",
+        );
+      } catch (error) {
+        showToast(
+          error instanceof Error
+            ? error.message
+            : "Failed to save timer session.",
+          "error",
+        );
+      }
+    };
 
-      showToast(
-        "Time entry deleted.",
-        "success"
-      );
-    } catch (error) {
-      showToast(
-        error instanceof Error
-          ? error.message
-          : "Failed to delete time entry.",
-        "error"
-      );
-    }
-  };
+  const handleAddEntry =
+    async () => {
+      if (!canCreate) {
+        showToast(
+          "You do not have permission to create time entries.",
+          "error",
+        );
+        return;
+      }
+
+      if (
+        !newEntry.description.trim() ||
+        !newEntry.projectId ||
+        !newEntry.date
+      ) {
+        showToast(
+          "Please fill in the required fields.",
+          "error",
+        );
+        return;
+      }
+
+      const hours =
+        Number(newEntry.hours) ||
+        0;
+
+      const minutes =
+        Number(newEntry.minutes) ||
+        0;
+
+      if (
+        minutes < 0 ||
+        minutes > 59
+      ) {
+        showToast(
+          "Minutes must be between 0 and 59.",
+          "error",
+        );
+        return;
+      }
+
+      const duration =
+        hours * 60 + minutes;
+
+      if (duration <= 0) {
+        showToast(
+          "Enter a valid duration.",
+          "error",
+        );
+        return;
+      }
+
+      const selectedProject =
+        projects.find(
+          (project) =>
+            project.id ===
+            Number(
+              newEntry.projectId,
+            ),
+        );
+
+      if (!selectedProject) {
+        showToast(
+          "Please select a valid project.",
+          "error",
+        );
+        return;
+      }
+
+      const selectedTask =
+        newEntry.taskId
+          ? tasks.find(
+              (task) =>
+                task.id ===
+                Number(
+                  newEntry.taskId,
+                ),
+            )
+          : undefined;
+
+      try {
+        const response =
+          await createTimeEntry({
+            description:
+              newEntry.description.trim(),
+            projectId:
+              selectedProject.id,
+            taskId:
+              selectedTask?.id,
+            date: newEntry.date,
+            duration,
+            billable:
+              newEntry.billable,
+            hourlyRate:
+              Number(
+                newEntry.hourlyRate,
+              ) || 1500,
+          });
+
+        if (
+          !response.success ||
+          !response.data
+        ) {
+          throw new Error(
+            response.message ||
+              "Failed to add time entry.",
+          );
+        }
+
+        setTimeEntries(
+          (current) => [
+            response.data!,
+            ...current,
+          ],
+        );
+
+        setNewEntry({
+          description: "",
+          projectId: "",
+          taskId: "",
+          date: new Date()
+            .toISOString()
+            .split("T")[0],
+          hours: "",
+          minutes: "",
+          billable: true,
+          hourlyRate: "1500",
+        });
+
+        setAddOpen(false);
+
+        showToast(
+          "Time entry added successfully.",
+          "success",
+        );
+      } catch (error) {
+        showToast(
+          error instanceof Error
+            ? error.message
+            : "Failed to add time entry.",
+          "error",
+        );
+      }
+    };
+
+  const handleDuplicate =
+    async (
+      entry: ApiTimeEntry,
+    ) => {
+      if (!canCreate) {
+        showToast(
+          "You do not have permission to create time entries.",
+          "error",
+        );
+        return;
+      }
+
+      try {
+        const response =
+          await createTimeEntry({
+            description: `${entry.description} - Copy`,
+            projectId:
+              entry.projectId,
+            taskId:
+              entry.taskId ??
+              undefined,
+            date:
+              toDateInputValue(
+                entry.date,
+              ),
+            duration:
+              entry.duration,
+            billable:
+              entry.billable,
+            hourlyRate:
+              entry.hourlyRate,
+          });
+
+        if (
+          !response.success ||
+          !response.data
+        ) {
+          throw new Error(
+            response.message ||
+              "Failed to duplicate time entry.",
+          );
+        }
+
+        setTimeEntries(
+          (current) => [
+            response.data!,
+            ...current,
+          ],
+        );
+
+        setMenuId(null);
+
+        showToast(
+          "Time entry duplicated.",
+          "success",
+        );
+      } catch (error) {
+        showToast(
+          error instanceof Error
+            ? error.message
+            : "Failed to duplicate time entry.",
+          "error",
+        );
+      }
+    };
+
+  const handleDelete =
+    async () => {
+      if (!canDelete) {
+        showToast(
+          "You do not have permission to delete time entries.",
+          "error",
+        );
+        return;
+      }
+
+      if (deleteId === null) {
+        return;
+      }
+
+      try {
+        const response =
+          await deleteTimeEntry(
+            deleteId,
+          );
+
+        if (!response.success) {
+          throw new Error(
+            response.message ||
+              "Failed to delete time entry.",
+          );
+        }
+
+        setTimeEntries(
+          (current) =>
+            current.filter(
+              (entry) =>
+                entry.id !==
+                deleteId,
+            ),
+        );
+
+        setDeleteId(null);
+        setMenuId(null);
+
+        showToast(
+          "Time entry deleted.",
+          "success",
+        );
+      } catch (error) {
+        showToast(
+          error instanceof Error
+            ? error.message
+            : "Failed to delete time entry.",
+          "error",
+        );
+      }
+    };
 
   const resetTimer = () => {
     setTimerRunning(false);
@@ -491,7 +760,6 @@ export default function TimePage() {
   return (
     <AppShell>
       <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-cyan-50/30">
-        {/* Header */}
         <div className="border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
           <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -511,19 +779,22 @@ export default function TimePage() {
                 </p>
               </div>
 
-              <button
-                onClick={() => setAddOpen(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200 transition hover:-translate-y-0.5 hover:shadow-xl"
-              >
-                <Plus className="h-4 w-4" />
-                Add Time
-              </button>
+              {canCreate && (
+                <button
+                  onClick={() =>
+                    setAddOpen(true)
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200 transition hover:-translate-y-0.5 hover:shadow-xl"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Time
+                </button>
+              )}
             </div>
           </div>
         </div>
 
         <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-          {/* Timer */}
           <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-blue-950 to-cyan-900 p-5 text-white shadow-xl sm:p-7">
             <div className="flex flex-col gap-7 xl:flex-row xl:items-center xl:justify-between">
               <div>
@@ -545,7 +816,9 @@ export default function TimePage() {
               <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
                 <div className="rounded-2xl border border-white/10 bg-white/10 px-6 py-4 text-center backdrop-blur">
                   <p className="font-mono text-4xl font-bold tracking-wider sm:text-5xl">
-                    {formatTimer(timerSeconds)}
+                    {formatTimer(
+                      timerSeconds,
+                    )}
                   </p>
 
                   <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
@@ -553,39 +826,45 @@ export default function TimePage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleStartTimer}
-                    className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-slate-900 shadow-lg transition hover:scale-105"
-                    title={
-                      timerRunning
-                        ? "Pause timer"
-                        : "Start timer"
-                    }
-                  >
-                    {timerRunning ? (
-                      <Pause className="h-5 w-5" />
-                    ) : (
-                      <Play className="h-5 w-5 fill-current" />
-                    )}
-                  </button>
+                {canCreate && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={
+                        handleStartTimer
+                      }
+                      className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-slate-900 shadow-lg transition hover:scale-105"
+                      title={
+                        timerRunning
+                          ? "Pause timer"
+                          : "Start timer"
+                      }
+                    >
+                      {timerRunning ? (
+                        <Pause className="h-5 w-5" />
+                      ) : (
+                        <Play className="h-5 w-5 fill-current" />
+                      )}
+                    </button>
 
-                  <button
-                    onClick={handleStopTimer}
-                    className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500 text-white shadow-lg transition hover:scale-105"
-                    title="Stop and save"
-                  >
-                    <Square className="h-4 w-4 fill-current" />
-                  </button>
+                    <button
+                      onClick={
+                        handleStopTimer
+                      }
+                      className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500 text-white shadow-lg transition hover:scale-105"
+                      title="Stop and save"
+                    >
+                      <Square className="h-4 w-4 fill-current" />
+                    </button>
 
-                  <button
-                    onClick={resetTimer}
-                    className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20"
-                    title="Reset"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
+                    <button
+                      onClick={resetTimer}
+                      className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20"
+                      title="Reset"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -596,7 +875,9 @@ export default function TimePage() {
                 </p>
 
                 <p className="mt-1 text-xl font-bold">
-                  {formatDuration(todayMinutes)}
+                  {formatDuration(
+                    todayMinutes,
+                  )}
                 </p>
               </div>
 
@@ -606,7 +887,9 @@ export default function TimePage() {
                 </p>
 
                 <p className="mt-1 text-xl font-bold">
-                  {formatDuration(billableMinutes)}
+                  {formatDuration(
+                    billableMinutes,
+                  )}
                 </p>
               </div>
 
@@ -616,13 +899,14 @@ export default function TimePage() {
                 </p>
 
                 <p className="mt-1 text-xl font-bold">
-                  {formatCurrency(totalValue)}
+                  {formatCurrency(
+                    totalValue,
+                  )}
                 </p>
               </div>
             </div>
           </section>
 
-          {/* Stats */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
               <div className="flex items-start justify-between">
@@ -632,7 +916,9 @@ export default function TimePage() {
                   </p>
 
                   <p className="mt-2 text-3xl font-bold text-violet-950">
-                    {formatDuration(totalMinutes)}
+                    {formatDuration(
+                      totalMinutes,
+                    )}
                   </p>
 
                   <p className="mt-1 text-xs text-violet-600">
@@ -654,7 +940,9 @@ export default function TimePage() {
                   </p>
 
                   <p className="mt-2 text-3xl font-bold text-emerald-950">
-                    {formatDuration(billableMinutes)}
+                    {formatDuration(
+                      billableMinutes,
+                    )}
                   </p>
 
                   <p className="mt-1 text-xs text-emerald-600">
@@ -676,7 +964,9 @@ export default function TimePage() {
                   </p>
 
                   <p className="mt-2 text-3xl font-bold text-blue-950">
-                    {formatCurrency(totalValue)}
+                    {formatCurrency(
+                      totalValue,
+                    )}
                   </p>
 
                   <p className="mt-1 text-xs text-blue-600">
@@ -698,12 +988,14 @@ export default function TimePage() {
                   </p>
 
                   <p className="mt-2 text-3xl font-bold text-orange-950">
-                    {billableMinutes > 0
+                    {billableMinutes >
+                    0
                       ? formatCurrency(
                           Math.round(
                             totalValue /
-                              (billableMinutes / 60)
-                          )
+                              (billableMinutes /
+                                60),
+                          ),
                         )
                       : "₹0"}
                   </p>
@@ -720,7 +1012,6 @@ export default function TimePage() {
             </div>
           </div>
 
-          {/* Filters */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row">
               <div className="relative flex-1">
@@ -728,7 +1019,11 @@ export default function TimePage() {
 
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) =>
+                    setSearch(
+                      e.target.value,
+                    )
+                  }
                   placeholder="Search time entries, tasks or projects..."
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                 />
@@ -737,34 +1032,41 @@ export default function TimePage() {
               <select
                 value={projectFilter}
                 onChange={(e) =>
-                  setProjectFilter(e.target.value)
+                  setProjectFilter(
+                    e.target.value,
+                  )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
               >
-                <option value="All">All Projects</option>
+                <option value="All">
+                  All Projects
+                </option>
 
-                {projects.map((project) => (
-                  <option
-                    key={project.id}
-                    value={project.name}
-                  >
-                    {project.name}
-                  </option>
-                ))}
+                {projects.map(
+                  (project) => (
+                    <option
+                      key={project.id}
+                      value={project.name}
+                    >
+                      {project.name}
+                    </option>
+                  ),
+                )}
               </select>
 
               <input
                 type="date"
                 value={dateFilter}
                 onChange={(e) =>
-                  setDateFilter(e.target.value)
+                  setDateFilter(
+                    e.target.value,
+                  )
                 }
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
               />
             </div>
           </div>
 
-          {/* Time Entries */}
           <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 bg-gradient-to-r from-cyan-50/70 via-white to-blue-50/50 px-5 py-5">
               <div className="flex items-center justify-between">
@@ -779,167 +1081,197 @@ export default function TimePage() {
                 </div>
 
                 <div className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm">
-                  {filteredEntries.length} entries
+                  {
+                    filteredEntries.length
+                  }{" "}
+                  entries
                 </div>
               </div>
             </div>
 
-            {/* Desktop */}
             <div className="hidden lg:block">
-              {filteredEntries.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="group border-b border-slate-100 p-5 transition hover:bg-cyan-50/20"
-                >
-                  <div className="flex items-center gap-5">
-                    <div
-                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${getProjectGradient(
-                        entry.projectName
-                      )} text-white shadow-sm`}
-                    >
-                      <Clock3 className="h-5 w-5" />
-                    </div>
-
-                    <div className="min-w-[250px] flex-1">
-                      <h3 className="text-sm font-bold text-slate-900">
-                        {entry.description}
-                      </h3>
-
-                      <div className="mt-1 flex items-center gap-2">
-                        <BriefcaseBusiness className="h-3.5 w-3.5 text-slate-400" />
-
-                        <span className="text-xs font-semibold text-slate-500">
-                          {entry.projectName}
-                        </span>
-
-                        {entry.taskName && (
-                          <>
-                            <span className="text-slate-300">
-                              •
-                            </span>
-
-                            <span className="truncate text-xs text-slate-400">
-                              {entry.taskName}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="min-w-[100px]">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        Duration
-                      </p>
-
-                      <p className="mt-1 text-sm font-bold text-slate-900">
-                        {formatDuration(entry.duration)}
-                      </p>
-                    </div>
-
-                    <div className="min-w-[110px]">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        Date
-                      </p>
-
-                      <div className="mt-1 flex items-center gap-1.5">
-                        <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
-
-                        <span className="text-xs font-semibold text-slate-700">
-                          {toDateInputValue(entry.date)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="min-w-[120px]">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        Rate
-                      </p>
-
-                      <p className="mt-1 text-sm font-bold text-slate-900">
-                        {formatCurrency(entry.hourlyRate)}/hr
-                      </p>
-                    </div>
-
-                    <div className="min-w-[120px]">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        Value
-                      </p>
-
-                      <p className="mt-1 text-sm font-bold text-emerald-600">
-                        {entry.billable
-                          ? formatCurrency(
-                              (entry.duration / 60) *
-                                entry.hourlyRate
-                            )
-                          : "Non-billable"}
-                      </p>
-                    </div>
-
-                    <div className="relative">
-                      <button
-                        onClick={() =>
-                          setMenuId(
-                            menuId === entry.id
-                              ? null
-                              : entry.id
-                          )
-                        }
-                        className="rounded-xl p-2.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                        aria-label="Time entry actions"
+              {filteredEntries.map(
+                (entry) => (
+                  <div
+                    key={entry.id}
+                    className="group border-b border-slate-100 p-5 transition hover:bg-cyan-50/20"
+                  >
+                    <div className="flex items-center gap-5">
+                      <div
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${getProjectGradient(
+                          entry.projectName,
+                        )} text-white shadow-sm`}
                       >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
+                        <Clock3 className="h-5 w-5" />
+                      </div>
 
-                      {menuId === entry.id && (
-                        <div className="absolute right-0 top-11 z-30 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                      <div className="min-w-[250px] flex-1">
+                        <h3 className="text-sm font-bold text-slate-900">
+                          {entry.description}
+                        </h3>
+
+                        <div className="mt-1 flex items-center gap-2">
+                          <BriefcaseBusiness className="h-3.5 w-3.5 text-slate-400" />
+
+                          <span className="text-xs font-semibold text-slate-500">
+                            {entry.projectName}
+                          </span>
+
+                          {entry.taskName && (
+                            <>
+                              <span className="text-slate-300">
+                                •
+                              </span>
+
+                              <span className="truncate text-xs text-slate-400">
+                                {
+                                  entry.taskName
+                                }
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="min-w-[100px]">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Duration
+                        </p>
+
+                        <p className="mt-1 text-sm font-bold text-slate-900">
+                          {formatDuration(
+                            entry.duration,
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="min-w-[110px]">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Date
+                        </p>
+
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+
+                          <span className="text-xs font-semibold text-slate-700">
+                            {toDateInputValue(
+                              entry.date,
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="min-w-[120px]">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Rate
+                        </p>
+
+                        <p className="mt-1 text-sm font-bold text-slate-900">
+                          {formatCurrency(
+                            entry.hourlyRate,
+                          )}
+                          /hr
+                        </p>
+                      </div>
+
+                      <div className="min-w-[120px]">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Value
+                        </p>
+
+                        <p className="mt-1 text-sm font-bold text-emerald-600">
+                          {entry.billable
+                            ? formatCurrency(
+                                (entry.duration /
+                                  60) *
+                                  entry.hourlyRate,
+                              )
+                            : "Non-billable"}
+                        </p>
+                      </div>
+
+                      {(canCreate ||
+                        canDelete) && (
+                        <div className="relative">
                           <button
                             onClick={() =>
-                              handleDuplicate(entry)
+                              setMenuId(
+                                menuId ===
+                                  entry.id
+                                  ? null
+                                  : entry.id,
+                              )
                             }
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            className="rounded-xl p-2.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                            aria-label="Time entry actions"
                           >
-                            <Copy className="h-3.5 w-3.5" />
-                            Duplicate
+                            <MoreHorizontal className="h-4 w-4" />
                           </button>
 
-                          <button
-                            onClick={() => {
-                              setDeleteId(entry.id);
-                              setMenuId(null);
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Delete
-                          </button>
+                          {menuId ===
+                            entry.id && (
+                            <div className="absolute right-0 top-11 z-30 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                              {canCreate && (
+                                <button
+                                  onClick={() =>
+                                    handleDuplicate(
+                                      entry,
+                                    )
+                                  }
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                  Duplicate
+                                </button>
+                              )}
+
+                              {canDelete && (
+                                <button
+                                  onClick={() => {
+                                    setDeleteId(
+                                      entry.id,
+                                    );
+                                    setMenuId(
+                                      null,
+                                    );
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
+
+                    <div className="ml-[68px] mt-3 flex items-center gap-3">
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                          entry.billable
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {entry.billable
+                          ? "Billable"
+                          : "Non-billable"}
+                      </span>
+
+                      <span className="text-[10px] text-slate-400">
+                        {entry.billable
+                          ? "Included in revenue calculations"
+                          : "Excluded from billable value"}
+                      </span>
+                    </div>
                   </div>
+                ),
+              )}
 
-                  <div className="ml-[68px] mt-3 flex items-center gap-3">
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
-                        entry.billable
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {entry.billable
-                        ? "Billable"
-                        : "Non-billable"}
-                    </span>
-
-                    <span className="text-[10px] text-slate-400">
-                      {entry.billable
-                        ? "Included in revenue calculations"
-                        : "Excluded from billable value"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-
-              {filteredEntries.length === 0 && (
+              {filteredEntries.length ===
+                0 && (
                 <div className="p-14 text-center">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-400">
                     <Clock3 className="h-6 w-6" />
@@ -956,122 +1288,153 @@ export default function TimePage() {
               )}
             </div>
 
-            {/* Mobile */}
             <div className="divide-y divide-slate-100 lg:hidden">
-              {filteredEntries.map((entry) => (
-                <div key={entry.id} className="p-4">
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${getProjectGradient(
-                        entry.projectName
-                      )} text-white`}
-                    >
-                      <Clock3 className="h-5 w-5" />
-                    </div>
+              {filteredEntries.map(
+                (entry) => (
+                  <div
+                    key={entry.id}
+                    className="p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${getProjectGradient(
+                          entry.projectName,
+                        )} text-white`}
+                      >
+                        <Clock3 className="h-5 w-5" />
+                      </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h3 className="text-sm font-bold text-slate-900">
-                            {entry.description}
-                          </h3>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-sm font-bold text-slate-900">
+                              {
+                                entry.description
+                              }
+                            </h3>
 
-                          <p className="mt-1 text-xs font-semibold text-slate-500">
-                            {entry.projectName}
-                          </p>
+                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                              {
+                                entry.projectName
+                              }
+                            </p>
+                          </div>
+
+                          {(canCreate ||
+                            canDelete) && (
+                            <button
+                              onClick={() =>
+                                setMenuId(
+                                  menuId ===
+                                    entry.id
+                                    ? null
+                                    : entry.id,
+                                )
+                              }
+                              className="rounded-lg p-1.5 text-slate-400"
+                              aria-label="Time entry actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
-
-                        <button
-                          onClick={() =>
-                            setMenuId(
-                              menuId === entry.id
-                                ? null
-                                : entry.id
-                            )
-                          }
-                          className="rounded-lg p-1.5 text-slate-400"
-                          aria-label="Time entry actions"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
                       </div>
                     </div>
-                  </div>
 
-                  {menuId === entry.id && (
-                    <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                      <button
-                        onClick={() =>
-                          handleDuplicate(entry)
-                        }
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        Duplicate
-                      </button>
+                    {menuId ===
+                      entry.id &&
+                      (canCreate ||
+                        canDelete) && (
+                        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                          {canCreate && (
+                            <button
+                              onClick={() =>
+                                handleDuplicate(
+                                  entry,
+                                )
+                              }
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              Duplicate
+                            </button>
+                          )}
 
-                      <button
-                        onClick={() => {
-                          setDeleteId(entry.id);
-                          setMenuId(null);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </button>
+                          {canDelete && (
+                            <button
+                              onClick={() => {
+                                setDeleteId(
+                                  entry.id,
+                                );
+                                setMenuId(
+                                  null,
+                                );
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="rounded-xl bg-cyan-50 p-3">
+                        <p className="text-[10px] font-semibold uppercase text-cyan-500">
+                          Duration
+                        </p>
+
+                        <p className="mt-1 text-sm font-bold text-cyan-900">
+                          {formatDuration(
+                            entry.duration,
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-emerald-50 p-3">
+                        <p className="text-[10px] font-semibold uppercase text-emerald-500">
+                          Value
+                        </p>
+
+                        <p className="mt-1 text-sm font-bold text-emerald-900">
+                          {entry.billable
+                            ? formatCurrency(
+                                (entry.duration /
+                                  60) *
+                                  entry.hourlyRate,
+                              )
+                            : "₹0"}
+                        </p>
+                      </div>
                     </div>
-                  )}
 
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div className="rounded-xl bg-cyan-50 p-3">
-                      <p className="text-[10px] font-semibold uppercase text-cyan-500">
-                        Duration
-                      </p>
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <CalendarDays className="h-3.5 w-3.5" />
+                        {toDateInputValue(
+                          entry.date,
+                        )}
+                      </div>
 
-                      <p className="mt-1 text-sm font-bold text-cyan-900">
-                        {formatDuration(entry.duration)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-emerald-50 p-3">
-                      <p className="text-[10px] font-semibold uppercase text-emerald-500">
-                        Value
-                      </p>
-
-                      <p className="mt-1 text-sm font-bold text-emerald-900">
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                          entry.billable
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-100 text-slate-500"
+                        }`}
+                      >
                         {entry.billable
-                          ? formatCurrency(
-                              (entry.duration / 60) *
-                                entry.hourlyRate
-                            )
-                          : "₹0"}
-                      </p>
+                          ? "Billable"
+                          : "Non-billable"}
+                      </span>
                     </div>
                   </div>
+                ),
+              )}
 
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                      <CalendarDays className="h-3.5 w-3.5" />
-                      {toDateInputValue(entry.date)}
-                    </div>
-
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
-                        entry.billable
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {entry.billable
-                        ? "Billable"
-                        : "Non-billable"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-
-              {filteredEntries.length === 0 && (
+              {filteredEntries.length ===
+                0 && (
                 <div className="p-12 text-center">
                   <Clock3 className="mx-auto h-8 w-8 text-slate-300" />
 
@@ -1083,7 +1446,6 @@ export default function TimePage() {
             </div>
           </div>
 
-          {/* Bottom banner */}
           <div className="rounded-2xl border border-cyan-200 bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 p-5 text-white shadow-lg">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
@@ -1113,8 +1475,7 @@ export default function TimePage() {
           </div>
         </main>
 
-        {/* Add Time Modal */}
-        {addOpen && (
+        {addOpen && canCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
               <div className="bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 px-6 py-5 text-white">
@@ -1135,7 +1496,9 @@ export default function TimePage() {
                   </div>
 
                   <button
-                    onClick={() => setAddOpen(false)}
+                    onClick={() =>
+                      setAddOpen(false)
+                    }
                     className="rounded-xl bg-white/10 p-2 hover:bg-white/20"
                     aria-label="Close"
                   >
@@ -1152,11 +1515,14 @@ export default function TimePage() {
                     </label>
 
                     <input
-                      value={newEntry.description}
+                      value={
+                        newEntry.description
+                      }
                       onChange={(e) =>
                         setNewEntry({
                           ...newEntry,
-                          description: e.target.value,
+                          description:
+                            e.target.value,
                         })
                       }
                       placeholder="Homepage development"
@@ -1170,11 +1536,14 @@ export default function TimePage() {
                     </label>
 
                     <select
-                      value={newEntry.projectId}
+                      value={
+                        newEntry.projectId
+                      }
                       onChange={(e) =>
                         setNewEntry({
                           ...newEntry,
-                          projectId: e.target.value,
+                          projectId:
+                            e.target.value,
                           taskId: "",
                         })
                       }
@@ -1184,14 +1553,16 @@ export default function TimePage() {
                         Select project
                       </option>
 
-                      {projects.map((project) => (
-                        <option
-                          key={project.id}
-                          value={project.id}
-                        >
-                          {project.name}
-                        </option>
-                      ))}
+                      {projects.map(
+                        (project) => (
+                          <option
+                            key={project.id}
+                            value={project.id}
+                          >
+                            {project.name}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </div>
 
@@ -1201,14 +1572,19 @@ export default function TimePage() {
                     </label>
 
                     <select
-                      value={newEntry.taskId}
+                      value={
+                        newEntry.taskId
+                      }
                       onChange={(e) =>
                         setNewEntry({
                           ...newEntry,
-                          taskId: e.target.value,
+                          taskId:
+                            e.target.value,
                         })
                       }
-                      disabled={!newEntry.projectId}
+                      disabled={
+                        !newEntry.projectId
+                      }
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                     >
                       <option value="">
@@ -1217,14 +1593,16 @@ export default function TimePage() {
                           : "Select project first"}
                       </option>
 
-                      {selectedProjectTasks.map((task) => (
-                        <option
-                          key={task.id}
-                          value={task.id}
-                        >
-                          {task.title}
-                        </option>
-                      ))}
+                      {selectedProjectTasks.map(
+                        (task) => (
+                          <option
+                            key={task.id}
+                            value={task.id}
+                          >
+                            {task.title}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </div>
 
@@ -1235,7 +1613,9 @@ export default function TimePage() {
 
                     <input
                       type="date"
-                      value={newEntry.date}
+                      value={
+                        newEntry.date
+                      }
                       onChange={(e) =>
                         setNewEntry({
                           ...newEntry,
@@ -1257,11 +1637,14 @@ export default function TimePage() {
                       <input
                         type="number"
                         min="0"
-                        value={newEntry.hourlyRate}
+                        value={
+                          newEntry.hourlyRate
+                        }
                         onChange={(e) =>
                           setNewEntry({
                             ...newEntry,
-                            hourlyRate: e.target.value,
+                            hourlyRate:
+                              e.target.value,
                           })
                         }
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-9 pr-4 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
@@ -1277,7 +1660,9 @@ export default function TimePage() {
                     <input
                       type="number"
                       min="0"
-                      value={newEntry.hours}
+                      value={
+                        newEntry.hours
+                      }
                       onChange={(e) =>
                         setNewEntry({
                           ...newEntry,
@@ -1298,11 +1683,14 @@ export default function TimePage() {
                       type="number"
                       min="0"
                       max="59"
-                      value={newEntry.minutes}
+                      value={
+                        newEntry.minutes
+                      }
                       onChange={(e) =>
                         setNewEntry({
                           ...newEntry,
-                          minutes: e.target.value,
+                          minutes:
+                            e.target.value,
                         })
                       }
                       placeholder="30"
@@ -1314,11 +1702,14 @@ export default function TimePage() {
                     <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
                       <input
                         type="checkbox"
-                        checked={newEntry.billable}
+                        checked={
+                          newEntry.billable
+                        }
                         onChange={(e) =>
                           setNewEntry({
                             ...newEntry,
-                            billable: e.target.checked,
+                            billable:
+                              e.target.checked,
                           })
                         }
                         className="h-4 w-4 rounded accent-emerald-600"
@@ -1339,14 +1730,18 @@ export default function TimePage() {
 
                 <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
                   <button
-                    onClick={() => setAddOpen(false)}
+                    onClick={() =>
+                      setAddOpen(false)
+                    }
                     className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
                   >
                     Cancel
                   </button>
 
                   <button
-                    onClick={handleAddEntry}
+                    onClick={
+                      handleAddEntry
+                    }
                     className="rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200 hover:-translate-y-0.5"
                   >
                     Add Time Entry
@@ -1357,40 +1752,46 @@ export default function TimePage() {
           </div>
         )}
 
-        {/* Delete Modal */}
-        {deleteId !== null && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
-                <Trash2 className="h-5 w-5" />
-              </div>
+        {deleteId !== null &&
+          canDelete && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                  <Trash2 className="h-5 w-5" />
+                </div>
 
-              <h2 className="mt-5 text-lg font-bold text-slate-900">
-                Delete this time entry?
-              </h2>
+                <h2 className="mt-5 text-lg font-bold text-slate-900">
+                  Delete this time entry?
+                </h2>
 
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                This tracked work will be permanently removed.
-              </p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  This tracked work will be permanently removed.
+                </p>
 
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  onClick={() => setDeleteId(null)}
-                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button
+                    onClick={() =>
+                      setDeleteId(
+                        null,
+                      )
+                    }
+                    className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
 
-                <button
-                  onClick={handleDelete}
-                  className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
-                >
-                  Delete Entry
-                </button>
+                  <button
+                    onClick={
+                      handleDelete
+                    }
+                    className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"
+                  >
+                    Delete Entry
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
       </div>
     </AppShell>
   );

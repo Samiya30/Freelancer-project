@@ -15,20 +15,21 @@ import {
   Sparkles,
   Sun,
   User,
-  Users,
   Building2,
   Mail,
   Phone,
   Briefcase,
-  FileText,
   Smartphone,
   Monitor,
   AlertTriangle,
-  LogOut,
   Camera,
   Upload,
   CheckCircle2,
 } from "lucide-react";
+
+import AppShell from "@/components/layout/AppShell";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/lib/auth/AuthContext";
 
 import {
   getSettings,
@@ -91,20 +92,20 @@ const sections: {
 
 const defaultSettings: SettingsData = {
   profile: {
-    firstName: "Samiya",
-    lastName: "Sharma",
-    email: "Sam@example.com",
-    phone: "+91 98765 43210",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
     role: "Freelancer",
-    bio: "Independent freelancer helping businesses build better digital experiences.",
+    bio: "",
   },
 
   workspace: {
-    name: "Samiya's Workspace",
-    website: "https://example.com",
+    name: "",
+    website: "",
     industry: "Technology",
     timezone: "Asia/Kolkata",
-    currency: "INR (₹)",
+    currency: "INR",
   },
 
   notifications: {
@@ -120,54 +121,88 @@ const defaultSettings: SettingsData = {
 };
 
 export default function SettingsPage() {
+  const { hasPermission, authorization } = useAuth();
+  const { showToast } = useToast();
+
+  const canView =
+    hasPermission("settings.view");
+
+  const canUpdate =
+    hasPermission("settings.update");
+
   const [activeSection, setActiveSection] =
     useState<Section>("profile");
 
-  const [profile, setProfile] = useState(defaultSettings.profile);
+  const [profile, setProfile] = useState(
+    defaultSettings.profile
+  );
+
   const [workspace, setWorkspace] =
     useState(defaultSettings.workspace);
+
   const [notifications, setNotifications] =
     useState(defaultSettings.notifications);
+
   const [appearance, setAppearance] =
-    useState<Appearance>(defaultSettings.appearance);
+    useState<Appearance>(
+      defaultSettings.appearance
+    );
 
-  const [loadingSettings, setLoadingSettings] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [loadingSettings, setLoadingSettings] =
+    useState(true);
 
-  const showToast = (message: string) => {
-    setToast(message);
-
-    window.setTimeout(() => {
-      setToast(null);
-    }, 3000);
-  };
+  const [saving, setSaving] =
+    useState(false);
 
   useEffect(() => {
+    if (!canView) {
+      setLoadingSettings(false);
+      return;
+    }
+
     let cancelled = false;
 
     const loadSettings = async () => {
       try {
         setLoadingSettings(true);
 
-        const response = await getSettings();
+        const response =
+          await getSettings();
 
-        if (!response.data || cancelled) {
+        if (
+          cancelled ||
+          !response.data
+        ) {
           return;
         }
 
-        setProfile(response.data.profile);
-        setWorkspace(response.data.workspace);
-        setNotifications(response.data.notifications);
-        setAppearance(response.data.appearance);
+        setProfile(
+          response.data.profile
+        );
+
+        setWorkspace(
+          response.data.workspace
+        );
+
+        setNotifications(
+          response.data.notifications
+        );
+
+        setAppearance(
+          response.data.appearance
+        );
       } catch (error) {
-        console.error("Failed to load settings:", error);
+        console.error(
+          "Failed to load settings:",
+          error
+        );
 
         if (!cancelled) {
           showToast(
             error instanceof Error
               ? error.message
-              : "Failed to load settings."
+              : "Failed to load settings.",
+            "error"
           );
         }
       } finally {
@@ -182,9 +217,17 @@ export default function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canView, showToast]);
 
   const saveSettings = async () => {
+    if (!canUpdate) {
+      showToast(
+        "You do not have permission to update settings.",
+        "error"
+      );
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -194,7 +237,14 @@ export default function SettingsPage() {
           lastName: profile.lastName,
           email: profile.email,
           phone: profile.phone,
-          role: profile.role,
+
+          // Role is controlled by workspace RBAC.
+          // Do not use this field to change authorization.
+          role:
+            authorization?.roleName ||
+            profile.role ||
+            "Freelancer",
+
           bio: profile.bio,
         },
 
@@ -218,30 +268,51 @@ export default function SettingsPage() {
         appearance,
       };
 
-      const response = await updateSettings(payload);
+      const response =
+        await updateSettings(payload);
 
-      if (!response.data) {
+      if (
+        !response.success ||
+        !response.data
+      ) {
         throw new Error(
-          "Settings were saved but no data was returned."
+          response.message ||
+            "Settings could not be saved."
         );
       }
 
-      setProfile(response.data.profile);
-      setWorkspace(response.data.workspace);
-      setNotifications(response.data.notifications);
-      setAppearance(response.data.appearance);
+      setProfile(
+        response.data.profile
+      );
+
+      setWorkspace(
+        response.data.workspace
+      );
+
+      setNotifications(
+        response.data.notifications
+      );
+
+      setAppearance(
+        response.data.appearance
+      );
 
       showToast(
         response.message ||
-          "Your settings have been updated successfully."
+          "Your settings have been updated successfully.",
+        "success"
       );
     } catch (error) {
-      console.error("Failed to save settings:", error);
+      console.error(
+        "Failed to save settings:",
+        error
+      );
 
       showToast(
         error instanceof Error
           ? error.message
-          : "Failed to save settings."
+          : "Failed to save settings.",
+        "error"
       );
     } finally {
       setSaving(false);
@@ -261,6 +332,9 @@ export default function SettingsPage() {
   ) => {
     const Icon = options?.icon;
 
+    const disabled =
+      options?.disabled || !canUpdate;
+
     return (
       <div className="space-y-2">
         <label className="text-sm font-semibold text-slate-700">
@@ -275,7 +349,7 @@ export default function SettingsPage() {
           <input
             type={options?.type || "text"}
             value={value}
-            disabled={options?.disabled}
+            disabled={disabled}
             placeholder={options?.placeholder}
             onChange={(event) =>
               onChange(event.target.value)
@@ -283,7 +357,7 @@ export default function SettingsPage() {
             className={`w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 ${
               Icon ? "pl-11" : ""
             } ${
-              options?.disabled
+              disabled
                 ? "cursor-not-allowed bg-slate-50 text-slate-500"
                 : ""
             }`}
@@ -319,15 +393,26 @@ export default function SettingsPage() {
 
         <button
           type="button"
-          onClick={() => onChange(!value)}
+          disabled={!canUpdate}
+          onClick={() =>
+            onChange(!value)
+          }
           aria-pressed={value}
           className={`relative h-7 w-12 shrink-0 rounded-full transition ${
-            value ? "bg-violet-600" : "bg-slate-200"
+            value
+              ? "bg-violet-600"
+              : "bg-slate-200"
+          } ${
+            !canUpdate
+              ? "cursor-not-allowed opacity-50"
+              : ""
           }`}
         >
           <span
             className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition ${
-              value ? "left-6" : "left-1"
+              value
+                ? "left-6"
+                : "left-1"
             }`}
           />
         </button>
@@ -360,18 +445,21 @@ export default function SettingsPage() {
 
               <div className="pb-2">
                 <h3 className="text-xl font-bold text-slate-900">
-                  {profile.firstName} {profile.lastName}
+                  {profile.firstName}{" "}
+                  {profile.lastName}
                 </h3>
 
                 <p className="text-sm text-slate-500">
-                  {profile.role}
+                  {authorization?.roleName ||
+                    profile.role}
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+              disabled={!canUpdate}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Camera className="h-4 w-4" />
               Change photo
@@ -387,8 +475,7 @@ export default function SettingsPage() {
           </h3>
 
           <p className="mt-1 text-sm text-slate-500">
-            This information is used across your FreelanceOS
-            workspace.
+            This information is used across your FreelanceOS workspace.
           </p>
         </div>
 
@@ -397,10 +484,12 @@ export default function SettingsPage() {
             "First name",
             profile.firstName,
             (value) =>
-              setProfile((current) => ({
-                ...current,
-                firstName: value,
-              })),
+              setProfile(
+                (current) => ({
+                  ...current,
+                  firstName: value,
+                })
+              ),
             { icon: User }
           )}
 
@@ -408,10 +497,12 @@ export default function SettingsPage() {
             "Last name",
             profile.lastName,
             (value) =>
-              setProfile((current) => ({
-                ...current,
-                lastName: value,
-              })),
+              setProfile(
+                (current) => ({
+                  ...current,
+                  lastName: value,
+                })
+              ),
             { icon: User }
           )}
 
@@ -419,10 +510,12 @@ export default function SettingsPage() {
             "Email address",
             profile.email,
             (value) =>
-              setProfile((current) => ({
-                ...current,
-                email: value,
-              })),
+              setProfile(
+                (current) => ({
+                  ...current,
+                  email: value,
+                })
+              ),
             {
               icon: Mail,
               type: "email",
@@ -433,22 +526,24 @@ export default function SettingsPage() {
             "Phone number",
             profile.phone,
             (value) =>
-              setProfile((current) => ({
-                ...current,
-                phone: value,
-              })),
+              setProfile(
+                (current) => ({
+                  ...current,
+                  phone: value,
+                })
+              ),
             { icon: Phone }
           )}
 
           {renderInput(
-            "Role",
-            profile.role,
-            (value) =>
-              setProfile((current) => ({
-                ...current,
-                role: value,
-              })),
-            { icon: Briefcase }
+            "Workspace role",
+            authorization?.roleName ||
+              profile.role,
+            () => {},
+            {
+              icon: Briefcase,
+              disabled: true,
+            }
           )}
         </div>
 
@@ -460,15 +555,39 @@ export default function SettingsPage() {
           <textarea
             value={profile.bio}
             rows={5}
+            disabled={!canUpdate}
             onChange={(event) =>
-              setProfile((current) => ({
-                ...current,
-                bio: event.target.value,
-              }))
+              setProfile(
+                (current) => ({
+                  ...current,
+                  bio: event.target.value,
+                })
+              )
             }
-            className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10"
+            className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
             placeholder="Tell clients about yourself..."
           />
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50/60 p-4">
+          <div className="flex items-start gap-3">
+            <Shield className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
+
+            <div>
+              <p className="text-sm font-bold text-violet-900">
+                Workspace role is managed by RBAC
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-violet-700">
+                Your current role is{" "}
+                <span className="font-bold">
+                  {authorization?.roleName ||
+                    "Freelancer"}
+                </span>
+                . Role changes are managed from workspace member administration.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -482,8 +601,7 @@ export default function SettingsPage() {
         </h2>
 
         <p className="mt-1 text-sm text-slate-500">
-          Configure your workspace identity and regional
-          preferences.
+          Configure your workspace identity and regional preferences.
         </p>
       </div>
 
@@ -521,7 +639,8 @@ export default function SettingsPage() {
 
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+            disabled={!canUpdate}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Upload className="h-4 w-4" />
             Upload
@@ -533,10 +652,12 @@ export default function SettingsPage() {
             "Workspace name",
             workspace.name,
             (value) =>
-              setWorkspace((current) => ({
-                ...current,
-                name: value,
-              })),
+              setWorkspace(
+                (current) => ({
+                  ...current,
+                  name: value,
+                })
+              ),
             { icon: Building2 }
           )}
 
@@ -544,11 +665,16 @@ export default function SettingsPage() {
             "Website",
             workspace.website,
             (value) =>
-              setWorkspace((current) => ({
-                ...current,
-                website: value,
-              })),
-            { icon: Globe, type: "url" }
+              setWorkspace(
+                (current) => ({
+                  ...current,
+                  website: value,
+                })
+              ),
+            {
+              icon: Globe,
+              type: "url",
+            }
           )}
 
           <div className="space-y-2">
@@ -558,13 +684,17 @@ export default function SettingsPage() {
 
             <select
               value={workspace.industry}
+              disabled={!canUpdate}
               onChange={(event) =>
-                setWorkspace((current) => ({
-                  ...current,
-                  industry: event.target.value,
-                }))
+                setWorkspace(
+                  (current) => ({
+                    ...current,
+                    industry:
+                      event.target.value,
+                  })
+                )
               }
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:bg-slate-50"
             >
               <option>Technology</option>
               <option>Design</option>
@@ -584,18 +714,24 @@ export default function SettingsPage() {
 
             <select
               value={workspace.timezone}
+              disabled={!canUpdate}
               onChange={(event) =>
-                setWorkspace((current) => ({
-                  ...current,
-                  timezone: event.target.value,
-                }))
+                setWorkspace(
+                  (current) => ({
+                    ...current,
+                    timezone:
+                      event.target.value,
+                  })
+                )
               }
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:bg-slate-50"
             >
               <option value="Asia/Kolkata">
                 Asia/Kolkata
               </option>
-              <option value="Asia/Dubai">Asia/Dubai</option>
+              <option value="Asia/Dubai">
+                Asia/Dubai
+              </option>
               <option value="Europe/London">
                 Europe/London
               </option>
@@ -621,21 +757,39 @@ export default function SettingsPage() {
 
             <select
               value={workspace.currency}
+              disabled={!canUpdate}
               onChange={(event) =>
-                setWorkspace((current) => ({
-                  ...current,
-                  currency: event.target.value,
-                }))
+                setWorkspace(
+                  (current) => ({
+                    ...current,
+                    currency:
+                      event.target.value,
+                  })
+                )
               }
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:bg-slate-50"
             >
-              <option>INR (₹)</option>
-              <option>USD ($)</option>
-              <option>EUR (€)</option>
-              <option>GBP (£)</option>
-              <option>AED (د.إ)</option>
-              <option>CAD ($)</option>
-              <option>AUD ($)</option>
+              <option value="INR">
+                INR (₹)
+              </option>
+              <option value="USD">
+                USD ($)
+              </option>
+              <option value="EUR">
+                EUR (€)
+              </option>
+              <option value="GBP">
+                GBP (£)
+              </option>
+              <option value="AED">
+                AED (د.إ)
+              </option>
+              <option value="CAD">
+                CAD ($)
+              </option>
+              <option value="AUD">
+                AUD ($)
+              </option>
             </select>
           </div>
         </div>
@@ -678,10 +832,12 @@ export default function SettingsPage() {
             "Receive important account and workspace updates by email.",
             notifications.email,
             (value) =>
-              setNotifications((current) => ({
-                ...current,
-                email: value,
-              }))
+              setNotifications(
+                (current) => ({
+                  ...current,
+                  email: value,
+                })
+              )
           )}
 
           {renderToggle(
@@ -689,10 +845,12 @@ export default function SettingsPage() {
             "Get notified when project status or milestones change.",
             notifications.projects,
             (value) =>
-              setNotifications((current) => ({
-                ...current,
-                projects: value,
-              }))
+              setNotifications(
+                (current) => ({
+                  ...current,
+                  projects: value,
+                })
+              )
           )}
 
           {renderToggle(
@@ -700,10 +858,12 @@ export default function SettingsPage() {
             "Receive alerts about invoices, payments and overdue invoices.",
             notifications.invoices,
             (value) =>
-              setNotifications((current) => ({
-                ...current,
-                invoices: value,
-              }))
+              setNotifications(
+                (current) => ({
+                  ...current,
+                  invoices: value,
+                })
+              )
           )}
 
           {renderToggle(
@@ -711,10 +871,12 @@ export default function SettingsPage() {
             "Receive reminders about upcoming and overdue tasks.",
             notifications.tasks,
             (value) =>
-              setNotifications((current) => ({
-                ...current,
-                tasks: value,
-              }))
+              setNotifications(
+                (current) => ({
+                  ...current,
+                  tasks: value,
+                })
+              )
           )}
 
           {renderToggle(
@@ -722,10 +884,12 @@ export default function SettingsPage() {
             "Receive a weekly overview of your freelance business.",
             notifications.weekly,
             (value) =>
-              setNotifications((current) => ({
-                ...current,
-                weekly: value,
-              }))
+              setNotifications(
+                (current) => ({
+                  ...current,
+                  weekly: value,
+                })
+              )
           )}
 
           {renderToggle(
@@ -733,10 +897,12 @@ export default function SettingsPage() {
             "Receive product updates, tips and occasional offers.",
             notifications.marketing,
             (value) =>
-              setNotifications((current) => ({
-                ...current,
-                marketing: value,
-              }))
+              setNotifications(
+                (current) => ({
+                  ...current,
+                  marketing: value,
+                })
+              )
           )}
         </div>
       </div>
@@ -768,14 +934,14 @@ export default function SettingsPage() {
             </h3>
 
             <p className="mt-2 max-w-lg text-sm leading-6 text-white/75">
-              Start managing your freelance business with the
-              essential FreelanceOS tools.
+              Start managing your freelance business with the essential FreelanceOS tools.
             </p>
           </div>
 
           <button
             type="button"
-            className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-violet-700 shadow-lg transition hover:bg-violet-50"
+            disabled
+            className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-violet-700 shadow-lg opacity-80"
           >
             Upgrade to Pro
           </button>
@@ -850,14 +1016,15 @@ export default function SettingsPage() {
                 </p>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Last changed recently
+                  Manage your account password.
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              disabled
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400"
             >
               Change
             </button>
@@ -882,7 +1049,8 @@ export default function SettingsPage() {
 
             <button
               type="button"
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              disabled
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400"
             >
               Enable
             </button>
@@ -907,7 +1075,8 @@ export default function SettingsPage() {
 
             <button
               type="button"
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              disabled
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400"
             >
               Review
             </button>
@@ -927,13 +1096,14 @@ export default function SettingsPage() {
             </h3>
 
             <p className="mt-1 text-sm leading-6 text-red-700/80">
-              Permanently delete your workspace and all associated
-              data. This action cannot be undone.
+              Workspace deletion will be implemented through a dedicated
+              protected workflow. It is not enabled from this screen.
             </p>
 
             <button
               type="button"
-              className="mt-4 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-100"
+              disabled
+              className="mt-4 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-400"
             >
               Delete workspace
             </button>
@@ -986,17 +1156,28 @@ export default function SettingsPage() {
             },
           ].map((option) => {
             const Icon = option.icon;
-            const selected = appearance === option.value;
+            const selected =
+              appearance ===
+              option.value;
 
             return (
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setAppearance(option.value)}
-                className={`relative rounded-2xl border-2 p-5 text-left transition ${
+                disabled={!canUpdate}
+                onClick={() =>
+                  setAppearance(
+                    option.value
+                  )
+                }
+                className={`relative rounded-2xl border-2 p-5 text-left transition disabled:cursor-not-allowed ${
                   selected
                     ? "border-violet-500 bg-violet-50"
                     : "border-slate-200 bg-white hover:border-violet-200 hover:bg-slate-50"
+                } ${
+                  !canUpdate
+                    ? "opacity-60"
+                    : ""
                 }`}
               >
                 {selected && (
@@ -1055,231 +1236,240 @@ export default function SettingsPage() {
     }
   };
 
+  if (!canView) {
+    return (
+      <AppShell>
+        <div className="flex min-h-[70vh] items-center justify-center bg-slate-50 px-6">
+          <div className="max-w-md rounded-3xl border border-red-200 bg-white p-8 text-center shadow-xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600">
+              <Shield className="h-7 w-7" />
+            </div>
+
+            <h1 className="mt-5 text-xl font-bold text-slate-900">
+              Settings access restricted
+            </h1>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Your workspace role does not currently have permission to view settings.
+            </p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Toast */}
-      {toast && (
-        <div className="fixed right-6 top-6 z-50 flex max-w-sm items-center gap-3 rounded-2xl border border-emerald-200 bg-white px-5 py-4 shadow-2xl">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-            <CheckCircle2 className="h-5 w-5" />
-          </div>
+    <AppShell>
+      <div className="min-h-screen bg-slate-50">
+        <div className="relative overflow-hidden bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-700">
+          <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
 
-          <p className="text-sm font-semibold text-slate-800">
-            {toast}
-          </p>
-        </div>
-      )}
+          <div className="absolute -bottom-32 left-1/3 h-80 w-80 rounded-full bg-fuchsia-400/10 blur-3xl" />
 
-      {/* Hero */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-700">
-        <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-32 left-1/3 h-80 w-80 rounded-full bg-fuchsia-400/10 blur-3xl" />
-
-        <div className="relative mx-auto max-w-7xl px-6 py-10 lg:px-8">
-          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-bold text-white backdrop-blur">
-                <Sparkles className="h-3.5 w-3.5" />
-                Workspace settings
-              </div>
-
-              <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
-                Settings
-              </h1>
-
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/70 md:text-base">
-                Manage your profile, workspace preferences,
-                notifications and account configuration.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={saveSettings}
-              disabled={saving || loadingSettings}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-violet-700 shadow-xl transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Save className="h-4 w-4" />
-
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Main */}
-      <main className="mx-auto max-w-7xl px-6 py-8 lg:px-8">
-        <div className="grid gap-8 lg:grid-cols-[280px_minmax(0,1fr)]">
-          {/* Sidebar */}
-          <aside className="h-fit rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="mb-3 px-3 py-3">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Account
-              </p>
-            </div>
-
-            <nav className="space-y-1">
-              {sections.map((section) => {
-                const Icon = section.icon;
-                const active = activeSection === section.id;
-
-                return (
-                  <button
-                    key={section.id}
-                    type="button"
-                    onClick={() =>
-                      setActiveSection(section.id)
-                    }
-                    className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition ${
-                      active
-                        ? "bg-gradient-to-r from-violet-50 to-indigo-50 text-violet-700"
-                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                    }`}
-                  >
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition ${
-                        active
-                          ? "bg-violet-600 text-white shadow-md shadow-violet-500/20"
-                          : "bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-slate-700"
-                      }`}
-                    >
-                      <Icon className="h-4.5 w-4.5" />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold">
-                        {section.label}
-                      </p>
-
-                      <p
-                        className={`mt-0.5 truncate text-xs ${
-                          active
-                            ? "text-violet-500"
-                            : "text-slate-400"
-                        }`}
-                      >
-                        {section.description}
-                      </p>
-                    </div>
-
-                    <ChevronRight
-                      className={`h-4 w-4 transition ${
-                        active
-                          ? "text-violet-500"
-                          : "text-slate-300 group-hover:text-slate-500"
-                      }`}
-                    />
-                  </button>
-                );
-              })}
-            </nav>
-
-            {/* Upgrade card */}
-            <div className="mt-4 overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 p-5 text-white">
-              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-white/15">
-                <Sparkles className="h-5 w-5" />
-              </div>
-
-              <p className="font-bold">
-                Unlock Pro
-              </p>
-
-              <p className="mt-1 text-xs leading-5 text-white/70">
-                Get advanced reports, automation and unlimited
-                business tools.
-              </p>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setActiveSection("billing")
-                }
-                className="mt-4 flex w-full items-center justify-center rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold backdrop-blur transition hover:bg-white/20"
-              >
-                View plan
-              </button>
-            </div>
-          </aside>
-
-          {/* Content */}
-          <section className="min-w-0">
-            {loadingSettings ? (
-              <div className="rounded-3xl border border-slate-200 bg-white p-12 shadow-sm">
-                <div className="flex flex-col items-center justify-center text-center">
-                  <div className="flex h-14 w-14 animate-pulse items-center justify-center rounded-2xl bg-violet-100 text-violet-600">
-                    <SettingsIcon />
-                  </div>
-
-                  <h3 className="mt-5 font-bold text-slate-900">
-                    Loading settings...
-                  </h3>
-
-                  <p className="mt-1 text-sm text-slate-500">
-                    Fetching your saved workspace configuration.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              renderSection()
-            )}
-
-            {/* Bottom save */}
-            {!loadingSettings && (
-              <div className="mt-8 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                    <CheckCircle2 className="h-5 w-5" />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      Your changes are saved securely
-                    </p>
-
-                    <p className="text-xs text-slate-500">
-                      Changes are stored in your FreelanceOS
-                      workspace.
-                    </p>
-                  </div>
+          <div className="relative mx-auto max-w-7xl px-6 py-10 lg:px-8">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-bold text-white backdrop-blur">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Workspace settings
                 </div>
 
+                <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+                  Settings
+                </h1>
+
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-white/70 md:text-base">
+                  Manage your profile, workspace preferences, notifications and account configuration.
+                </p>
+              </div>
+
+              {canUpdate && (
                 <button
                   type="button"
                   onClick={saveSettings}
-                  disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={
+                    saving ||
+                    loadingSettings
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-violet-700 shadow-xl transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Save className="h-4 w-4" />
-                  {saving ? "Saving..." : "Save Changes"}
+
+                  {saving
+                    ? "Saving..."
+                    : "Save Changes"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <main className="mx-auto max-w-7xl px-6 py-8 lg:px-8">
+          <div className="grid gap-8 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="h-fit rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 px-3 py-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Account
+                </p>
+              </div>
+
+              <nav className="space-y-1">
+                {sections.map(
+                  (section) => {
+                    const Icon =
+                      section.icon;
+
+                    const active =
+                      activeSection ===
+                      section.id;
+
+                    return (
+                      <button
+                        key={
+                          section.id
+                        }
+                        type="button"
+                        onClick={() =>
+                          setActiveSection(
+                            section.id
+                          )
+                        }
+                        className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition ${
+                          active
+                            ? "bg-gradient-to-r from-violet-50 to-indigo-50 text-violet-700"
+                            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        }`}
+                      >
+                        <div
+                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition ${
+                            active
+                              ? "bg-violet-600 text-white shadow-md shadow-violet-500/20"
+                              : "bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-slate-700"
+                          }`}
+                        >
+                          <Icon className="h-4.5 w-4.5" />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold">
+                            {
+                              section.label
+                            }
+                          </p>
+
+                          <p
+                            className={`mt-0.5 truncate text-xs ${
+                              active
+                                ? "text-violet-500"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {
+                              section.description
+                            }
+                          </p>
+                        </div>
+
+                        <ChevronRight
+                          className={`h-4 w-4 transition ${
+                            active
+                              ? "text-violet-500"
+                              : "text-slate-300 group-hover:text-slate-500"
+                          }`}
+                        />
+                      </button>
+                    );
+                  }
+                )}
+              </nav>
+
+              <div className="mt-4 overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 p-5 text-white">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-white/15">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+
+                <p className="font-bold">
+                  Unlock Pro
+                </p>
+
+                <p className="mt-1 text-xs leading-5 text-white/70">
+                  Get advanced reports, automation and unlimited business tools.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveSection(
+                      "billing"
+                    )
+                  }
+                  className="mt-4 flex w-full items-center justify-center rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold backdrop-blur transition hover:bg-white/20"
+                >
+                  View plan
                 </button>
               </div>
-            )}
-          </section>
-        </div>
-      </main>
-    </div>
-  );
-}
+            </aside>
 
-function SettingsIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      className="h-6 w-6"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.7 1.7-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20h-2.4v-.2a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-1.7-1.7.06-.06A1.7 1.7 0 0 0 8.4 15a1.7 1.7 0 0 0-1.56-1.03H6.6v-2.4h.24A1.7 1.7 0 0 0 8.4 10a1.7 1.7 0 0 0-.34-1.88L8 8.06l1.7-1.7.06.06A1.7 1.7 0 0 0 11.64 6a1.7 1.7 0 0 0 1.03-1.56V4h2.4v.2A1.7 1.7 0 0 0 16.1 5.76a1.7 1.7 0 0 0 1.88-.34l.06-.06 1.7 1.7-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03h.24v2.4h-.24A1.7 1.7 0 0 0 19.4 15Z"
-      />
-    </svg>
+            <section className="min-w-0">
+              {loadingSettings ? (
+                <div className="rounded-3xl border border-slate-200 bg-white p-12 shadow-sm">
+                  <div className="flex flex-col items-center justify-center text-center">
+                    <div className="flex h-14 w-14 animate-pulse items-center justify-center rounded-2xl bg-violet-100 text-violet-600">
+                      <Palette className="h-6 w-6" />
+                    </div>
+
+                    <h3 className="mt-5 font-bold text-slate-900">
+                      Loading settings...
+                    </h3>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Fetching your saved workspace configuration.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                renderSection()
+              )}
+
+              {!loadingSettings &&
+                canUpdate && (
+                  <div className="mt-8 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          Your changes are saved securely
+                        </p>
+
+                        <p className="text-xs text-slate-500">
+                          Changes are stored in your FreelanceOS workspace.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={
+                        saveSettings
+                      }
+                      disabled={saving}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Save className="h-4 w-4" />
+
+                      {saving
+                        ? "Saving..."
+                        : "Save Changes"}
+                    </button>
+                  </div>
+                )}
+            </section>
+          </div>
+        </main>
+      </div>
+    </AppShell>
   );
 }
