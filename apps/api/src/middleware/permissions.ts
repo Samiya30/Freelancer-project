@@ -1,33 +1,44 @@
-import type { NextFunction, Request, Response } from "express";
+import type {
+  NextFunction,
+  Request,
+  Response,
+} from "express";
+
 import { prisma } from "../lib/prisma.js";
 
 type AuthenticatedRequest = Request & {
   userId?: unknown;
 };
 
-function getUserId(req: Request): number {
-  const userId = (req as AuthenticatedRequest).userId;
+function getUserId(
+  req: Request,
+): number | null {
+  const userId =
+    (req as AuthenticatedRequest).userId;
 
   if (
     typeof userId !== "number" ||
     !Number.isInteger(userId) ||
     userId <= 0
   ) {
-    throw new Error("Authenticated user ID is missing");
+    return null;
   }
 
   return userId;
 }
 
 /**
- * Finds the authenticated user's active workspace membership.
+ * Finds the authenticated user's active
+ * workspace membership.
  *
- * FreelanceOS currently initializes one workspace per installation.
- * This helper intentionally keeps workspace resolution centralized so
- * multi-workspace selection can be introduced later without rewriting
- * every permission check.
+ * Workspace selection is currently centralized here.
+ * This keeps permission resolution in one place and
+ * allows explicit workspace selection to be introduced
+ * later without rewriting every permission check.
  */
-export async function getWorkspaceMember(userId: number) {
+export async function getWorkspaceMember(
+  userId: number,
+) {
   return prisma.workspaceMember.findFirst({
     where: {
       userId,
@@ -57,78 +68,109 @@ export async function getWorkspaceMember(userId: number) {
 }
 
 /**
- * Returns the effective permission state for a workspace member.
+ * Returns whether the authenticated user has
+ * the requested permission.
  *
- * Resolution:
+ * Resolution order:
  *
- *   Role permissions
+ *   Role permission
  *          +
- *   Member overrides
+ *   Member override
  *          ↓
  *   Effective permission
  *
- * A member override takes precedence over the role permission.
+ * A member override always takes precedence
+ * over the role permission.
  */
 export async function hasPermission(
   userId: number,
   permissionKey: string,
 ): Promise<boolean> {
-  const member = await getWorkspaceMember(userId);
+  const member =
+    await getWorkspaceMember(userId);
 
   if (!member) {
     return false;
   }
 
-  const rolePermission = member.role.rolePermissions.find(
-    (entry) => entry.permission.key === permissionKey,
-  );
+  const rolePermission =
+    member.role.rolePermissions.find(
+      (entry) =>
+        entry.permission.key ===
+        permissionKey,
+    );
 
-  const memberOverride = member.permissionOverrides.find(
-    (entry) => entry.permission.key === permissionKey,
-  );
+  const memberOverride =
+    member.permissionOverrides.find(
+      (entry) =>
+        entry.permission.key ===
+        permissionKey,
+    );
 
   if (memberOverride) {
-    return memberOverride.effect === "Allow";
+    return (
+      memberOverride.effect ===
+      "Allow"
+    );
   }
 
   if (rolePermission) {
-    return rolePermission.effect === "Allow";
+    return (
+      rolePermission.effect ===
+      "Allow"
+    );
   }
 
   return false;
 }
 
 /**
- * Middleware factory for protecting API routes with a permission.
+ * Middleware factory for protecting API
+ * routes with a permission.
  *
  * Usage:
  *
  * router.get(
  *   "/",
+ *   requireAuth,
  *   requirePermission("clients.view"),
  *   async (req, res) => {
  *     ...
  *   }
  * );
  */
-export function requirePermission(permissionKey: string) {
+export function requirePermission(
+  permissionKey: string,
+) {
   return async (
     req: Request,
     res: Response,
     next: NextFunction,
   ): Promise<void> => {
     try {
-      const userId = getUserId(req);
+      const userId =
+        getUserId(req);
 
-      const allowed = await hasPermission(
-        userId,
-        permissionKey,
-      );
+      if (userId === null) {
+        res.status(401).json({
+          success: false,
+          message:
+            "Authentication required",
+        });
+        return;
+      }
+
+      const allowed =
+        await hasPermission(
+          userId,
+          permissionKey,
+        );
 
       if (!allowed) {
         res.status(403).json({
           success: false,
-          message: "You do not have permission to perform this action.",
+          message:
+            "You do not have permission to perform this action.",
           permission: permissionKey,
         });
         return;
@@ -142,51 +184,87 @@ export function requirePermission(permissionKey: string) {
 }
 
 /**
- * Returns the authenticated user's current RBAC context.
+ * Returns the authenticated user's current
+ * RBAC authorization context.
  *
- * Useful for /api/auth/me and frontend permission-aware UI.
+ * Used by /api/auth/me and the frontend
+ * permission-aware UI.
  */
 export async function getAuthorizationContext(
   userId: number,
 ) {
-  const member = await getWorkspaceMember(userId);
+  const member =
+    await getWorkspaceMember(userId);
 
   if (!member) {
     return null;
   }
 
-  const rolePermissions = member.role.rolePermissions
-    .filter(
-      (entry) => entry.effect === "Allow",
-    )
-    .map((entry) => entry.permission.key);
+  const rolePermissions =
+    member.role.rolePermissions
+      .filter(
+        (entry) =>
+          entry.effect === "Allow",
+      )
+      .map(
+        (entry) =>
+          entry.permission.key,
+      );
 
-  const overridePermissions = member.permissionOverrides.map(
-    (entry) => ({
-      key: entry.permission.key,
-      effect: entry.effect,
-    }),
-  );
+  const overridePermissions =
+    member.permissionOverrides.map(
+      (entry) => ({
+        key:
+          entry.permission.key,
+        effect: entry.effect,
+      }),
+    );
 
-  const effectivePermissions = new Set(
-    rolePermissions,
-  );
+  const effectivePermissions =
+    new Set(
+      rolePermissions,
+    );
 
-  for (const override of overridePermissions) {
-    if (override.effect === "Allow") {
-      effectivePermissions.add(override.key);
+  for (
+    const override of
+      overridePermissions
+  ) {
+    if (
+      override.effect ===
+      "Allow"
+    ) {
+      effectivePermissions.add(
+        override.key,
+      );
     } else {
-      effectivePermissions.delete(override.key);
+      effectivePermissions.delete(
+        override.key,
+      );
     }
   }
 
   return {
-    workspaceId: member.workspaceId,
-    workspaceName: member.workspace.name,
-    memberId: member.id,
-    roleId: member.roleId,
-    roleName: member.role.name,
-    status: member.status,
-    permissions: Array.from(effectivePermissions).sort(),
+    workspaceId:
+      member.workspaceId,
+
+    workspaceName:
+      member.workspace.name,
+
+    memberId:
+      member.id,
+
+    roleId:
+      member.roleId,
+
+    roleName:
+      member.role.name,
+
+    status:
+      member.status,
+
+    permissions:
+      Array.from(
+        effectivePermissions,
+      ).sort(),
   };
 }

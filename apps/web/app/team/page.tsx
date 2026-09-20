@@ -183,7 +183,7 @@ export default function TeamPage() {
     hasPermission("audit.view");
 
   const [activeTab, setActiveTab] =
-    useState<Tab>("members");
+    useState<Tab | null>(null);
 
   const [members, setMembers] =
     useState<WorkspaceMember[]>([]);
@@ -240,6 +240,25 @@ export default function TeamPage() {
 
   const [permissionSearch, setPermissionSearch] =
     useState("");
+
+  useEffect(() => {
+    if (canViewMembers) {
+      setActiveTab("members");
+    } else if (canViewRoles) {
+      setActiveTab("roles");
+    } else if (canViewPermissions) {
+      setActiveTab("permissions");
+    } else if (canViewAudit) {
+      setActiveTab("audit");
+    } else {
+      setActiveTab(null);
+    }
+  }, [
+    canViewMembers,
+    canViewRoles,
+    canViewPermissions,
+    canViewAudit,
+  ]);
 
   const loadData = async (
     showRefresh = false,
