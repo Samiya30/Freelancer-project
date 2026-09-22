@@ -9,7 +9,6 @@ import { prisma } from "../lib/prisma.js";
 import {
   createSession,
   deleteSession,
-  getSession,
   getSessionCookieName,
   getSessionCookieOptions,
   hashPassword,

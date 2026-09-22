@@ -31,10 +31,13 @@ function getUserId(
  * Finds the authenticated user's active
  * workspace membership.
  *
- * Workspace selection is currently centralized here.
- * This keeps permission resolution in one place and
- * allows explicit workspace selection to be introduced
- * later without rewriting every permission check.
+ * Workspace selection is centralized here.
+ * This keeps workspace resolution consistent
+ * across authentication, RBAC, and business
+ * routes.
+ *
+ * Currently the application supports one active
+ * workspace membership per user.
  */
 export async function getWorkspaceMember(
   userId: number,
@@ -65,6 +68,64 @@ export async function getWorkspaceMember(
       createdAt: "asc",
     },
   });
+}
+
+/**
+ * Returns the authenticated user's workspace ID.
+ *
+ * Business routes should use this value when
+ * querying or creating workspace-owned records.
+ *
+ * Example:
+ *
+ * const workspaceId =
+ *   await getWorkspaceId(req);
+ *
+ * const clients =
+ *   await prisma.client.findMany({
+ *     where: {
+ *       workspaceId,
+ *     },
+ *   });
+ */
+export async function getWorkspaceId(
+  userId: number,
+): Promise<number | null> {
+  const member =
+    await getWorkspaceMember(userId);
+
+  if (!member) {
+    return null;
+  }
+
+  return member.workspaceId;
+}
+
+/**
+ * Returns the authenticated user's complete
+ * workspace context.
+ *
+ * This is useful when a route needs both the
+ * workspace and membership information.
+ */
+export async function getWorkspaceContext(
+  userId: number,
+) {
+  const member =
+    await getWorkspaceMember(userId);
+
+  if (!member) {
+    return null;
+  }
+
+  return {
+    workspaceId: member.workspaceId,
+    workspaceName: member.workspace.name,
+    memberId: member.id,
+    roleId: member.roleId,
+    roleName: member.role.name,
+    status: member.status,
+  };
 }
 
 /**
@@ -267,4 +328,17 @@ export async function getAuthorizationContext(
         effectivePermissions,
       ).sort(),
   };
+}
+
+/**
+ * Extracts the authenticated user ID from
+ * the request.
+ *
+ * Kept exported so business routes can use
+ * the same validation logic.
+ */
+export function getAuthenticatedUserId(
+  req: Request,
+): number | null {
+  return getUserId(req);
 }
