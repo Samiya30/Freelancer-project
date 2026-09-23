@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -50,7 +53,8 @@ function getUserId(req: Request): number {
  * - time.view permission
  *
  * Ownership:
- * - Only returns entries belonging to the authenticated user.
+ * - Only returns entries belonging to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -58,10 +62,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const entries = await prisma.timeEntry.findMany({
         where: {
           userId,
+          workspaceId,
         },
         orderBy: [
           {
@@ -96,7 +109,8 @@ router.get(
  * - time.view permission
  *
  * Ownership:
- * - Time entry must belong to authenticated user.
+ * - Time entry must belong to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -113,11 +127,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const entry = await prisma.timeEntry.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -151,9 +174,10 @@ router.get(
  * - time.create permission
  *
  * Ownership:
- * - Entry belongs to authenticated user.
- * - Project must belong to authenticated user.
- * - Optional task must belong to authenticated user and selected project.
+ * - Entry belongs to authenticated user and workspace.
+ * - Project must belong to authenticated user's workspace.
+ * - Optional task must belong to authenticated user's workspace
+ *   and selected project.
  */
 router.post(
   "/",
@@ -171,11 +195,20 @@ router.post(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const project = await prisma.project.findFirst({
         where: {
           id: parsed.data.projectId,
           userId,
+          workspaceId,
         },
       });
 
@@ -195,6 +228,7 @@ router.post(
             id: parsed.data.taskId,
             projectId: project.id,
             userId,
+            workspaceId,
           },
         });
 
@@ -212,6 +246,7 @@ router.post(
       const entry = await prisma.timeEntry.create({
         data: {
           userId,
+          workspaceId,
           description: parsed.data.description,
           projectId: project.id,
           projectName: project.name,
@@ -248,9 +283,11 @@ router.post(
  * - time.update permission
  *
  * Ownership:
- * - Existing entry must belong to authenticated user.
- * - New project must belong to authenticated user.
- * - New task must belong to authenticated user and selected project.
+ * - Existing entry must belong to authenticated user
+ *   inside the active workspace.
+ * - New project must belong to authenticated user's workspace.
+ * - New task must belong to authenticated user's workspace
+ *   and selected project.
  */
 router.patch(
   "/:id",
@@ -277,11 +314,20 @@ router.patch(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingEntry = await prisma.timeEntry.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -331,6 +377,7 @@ router.patch(
           where: {
             id: parsed.data.projectId,
             userId,
+            workspaceId,
           },
         });
 
@@ -357,6 +404,7 @@ router.patch(
               id: parsed.data.taskId,
               projectId: selectedProjectId,
               userId,
+              workspaceId,
             },
           });
 
@@ -379,6 +427,7 @@ router.patch(
             id: existingEntry.taskId,
             projectId: selectedProjectId,
             userId,
+            workspaceId,
           },
         });
 
@@ -419,7 +468,8 @@ router.patch(
  * - time.delete permission
  *
  * Ownership:
- * - Entry must belong to authenticated user.
+ * - Entry must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -436,11 +486,20 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingEntry = await prisma.timeEntry.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -61,6 +64,7 @@ function getUserId(req: Request): number {
 
 async function validateClient(
   userId: number,
+  workspaceId: number,
   clientId: number | null | undefined,
 ) {
   if (clientId === undefined || clientId === null) {
@@ -71,6 +75,7 @@ async function validateClient(
     where: {
       id: clientId,
       userId,
+      workspaceId,
     },
   });
 }
@@ -83,7 +88,8 @@ async function validateClient(
  * - contracts.view permission
  *
  * Ownership:
- * - Only returns contracts belonging to the authenticated user.
+ * - Only returns contracts belonging to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -91,10 +97,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const contracts = await prisma.contract.findMany({
         where: {
           userId,
+          workspaceId,
         },
         include: {
           clientRecord: true,
@@ -127,7 +142,8 @@ router.get(
  * - contracts.view permission
  *
  * Ownership:
- * - Contract must belong to the authenticated user.
+ * - Contract must belong to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -144,11 +160,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const contract = await prisma.contract.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
         include: {
           clientRecord: true,
@@ -185,8 +210,8 @@ router.get(
  * - contracts.create permission
  *
  * Ownership:
- * - Contract is assigned to authenticated user.
- * - clientId must belong to authenticated user.
+ * - Contract is assigned to authenticated user and workspace.
+ * - clientId must belong to the same user and workspace.
  */
 router.post(
   "/",
@@ -204,9 +229,18 @@ router.post(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const client = await validateClient(
         userId,
+        workspaceId,
         parsed.data.clientId,
       );
 
@@ -237,6 +271,7 @@ router.post(
       const contract = await prisma.contract.create({
         data: {
           userId,
+          workspaceId,
           number: parsed.data.number,
           title: parsed.data.title,
           client: parsed.data.client,
@@ -278,8 +313,9 @@ router.post(
  * - contracts.update permission
  *
  * Ownership:
- * - Existing contract must belong to authenticated user.
- * - New clientId must belong to authenticated user.
+ * - Existing contract must belong to authenticated user
+ *   inside the active workspace.
+ * - New clientId must belong to the same user and workspace.
  */
 router.patch(
   "/:id",
@@ -306,11 +342,20 @@ router.patch(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingContract = await prisma.contract.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -324,6 +369,7 @@ router.patch(
       if (parsed.data.clientId !== undefined) {
         const client = await validateClient(
           userId,
+          workspaceId,
           parsed.data.clientId,
         );
 
@@ -432,7 +478,8 @@ router.patch(
  * - contracts.delete permission
  *
  * Ownership:
- * - Contract must belong to authenticated user.
+ * - Contract must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -449,11 +496,20 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingContract = await prisma.contract.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

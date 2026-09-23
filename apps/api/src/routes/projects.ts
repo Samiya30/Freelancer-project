@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -56,12 +59,14 @@ function getUserId(req: Request): number {
 
 async function findClientForProject(
   userId: number,
+  workspaceId: number,
   clientName: string,
   clientEmail: string,
 ) {
   return prisma.client.findFirst({
     where: {
       userId,
+      workspaceId,
       name: clientName,
       email: clientEmail,
     },
@@ -76,7 +81,8 @@ async function findClientForProject(
  * - projects.view permission
  *
  * Ownership:
- * - Only returns projects belonging to the authenticated user.
+ * - Only returns projects belonging to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -84,10 +90,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const projects = await prisma.project.findMany({
         where: {
           userId,
+          workspaceId,
         },
         orderBy: {
           createdAt: "desc",
@@ -117,7 +132,8 @@ router.get(
  * - projects.view permission
  *
  * Ownership:
- * - Project must belong to the authenticated user.
+ * - Project must belong to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -134,11 +150,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const project = await prisma.project.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -172,8 +197,8 @@ router.get(
  * - projects.create permission
  *
  * Ownership:
- * - Project is assigned to the authenticated user.
- * - Selected client must belong to the authenticated user.
+ * - Project is assigned to the authenticated user and workspace.
+ * - Selected client must belong to the authenticated user's workspace.
  */
 router.post(
   "/",
@@ -191,9 +216,18 @@ router.post(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const client = await findClientForProject(
         userId,
+        workspaceId,
         parsed.data.client,
         parsed.data.clientEmail,
       );
@@ -227,6 +261,7 @@ router.post(
       const project = await prisma.project.create({
         data: {
           userId,
+          workspaceId,
           name: parsed.data.name,
           client: client.name,
           clientEmail: client.email,
@@ -264,8 +299,9 @@ router.post(
  * - projects.update permission
  *
  * Ownership:
- * - Existing project must belong to the authenticated user.
- * - New client must also belong to the authenticated user.
+ * - Existing project must belong to the authenticated user
+ *   inside the active workspace.
+ * - New client must also belong to the same workspace.
  */
 router.patch(
   "/:id",
@@ -292,11 +328,20 @@ router.patch(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingProject = await prisma.project.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -313,10 +358,6 @@ router.patch(
         updateData.name = parsed.data.name;
       }
 
-      /*
-       * Client changes are always resolved against a client
-       * belonging to the authenticated user.
-       */
       if (
         parsed.data.client !== undefined ||
         parsed.data.clientEmail !== undefined
@@ -330,6 +371,7 @@ router.patch(
 
         const client = await findClientForProject(
           userId,
+          workspaceId,
           clientName,
           clientEmail,
         );
@@ -419,7 +461,8 @@ router.patch(
  * - projects.delete permission
  *
  * Ownership:
- * - Project must belong to the authenticated user.
+ * - Project must belong to the authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -436,11 +479,20 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingProject = await prisma.project.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

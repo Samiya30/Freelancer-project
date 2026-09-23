@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -77,7 +80,8 @@ function getUserId(req: Request): number {
  * - tasks.view permission
  *
  * Ownership:
- * - Only returns tasks belonging to the authenticated user.
+ * - Only returns tasks belonging to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -85,10 +89,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const tasks = await prisma.task.findMany({
         where: {
           userId,
+          workspaceId,
         },
         orderBy: {
           createdAt: "desc",
@@ -118,7 +131,8 @@ router.get(
  * - tasks.view permission
  *
  * Ownership:
- * - Task must belong to the authenticated user.
+ * - Task must belong to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -135,11 +149,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const task = await prisma.task.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -173,8 +196,8 @@ router.get(
  * - tasks.create permission
  *
  * Ownership:
- * - Task is assigned to authenticated user.
- * - Project must belong to authenticated user.
+ * - Task is assigned to authenticated user and workspace.
+ * - Project must belong to the authenticated user's workspace.
  */
 router.post(
   "/",
@@ -192,11 +215,20 @@ router.post(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const project = await prisma.project.findFirst({
         where: {
           id: parsed.data.projectId,
           userId,
+          workspaceId,
         },
       });
 
@@ -210,6 +242,7 @@ router.post(
       const task = await prisma.task.create({
         data: {
           userId,
+          workspaceId,
           title: parsed.data.title,
           description: parsed.data.description ?? "",
           projectId: project.id,
@@ -244,8 +277,9 @@ router.post(
  * - tasks.update permission
  *
  * Ownership:
- * - Existing task must belong to authenticated user.
- * - New projectId must also belong to authenticated user.
+ * - Existing task must belong to authenticated user
+ *   inside the active workspace.
+ * - New projectId must also belong to that workspace.
  */
 router.patch(
   "/:id",
@@ -272,11 +306,20 @@ router.patch(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingTask = await prisma.task.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -310,6 +353,7 @@ router.patch(
           where: {
             id: parsed.data.projectId,
             userId,
+            workspaceId,
           },
         });
 
@@ -371,7 +415,8 @@ router.patch(
  * - tasks.delete permission
  *
  * Ownership:
- * - Task must belong to authenticated user.
+ * - Task must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -388,11 +433,20 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingTask = await prisma.task.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

@@ -7,7 +7,10 @@ import crypto from "node:crypto";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -201,6 +204,7 @@ function detectFileType(filename: string) {
 
 async function validateRelations(
   userId: number,
+  workspaceId: number,
   clientId: number | null | undefined,
   projectId: number | null | undefined,
 ) {
@@ -215,6 +219,7 @@ async function validateRelations(
       where: {
         id: clientId,
         userId,
+        workspaceId,
       },
     });
 
@@ -236,6 +241,7 @@ async function validateRelations(
       where: {
         id: projectId,
         userId,
+        workspaceId,
       },
     });
 
@@ -280,7 +286,8 @@ async function validateRelations(
  * - files.view permission
  *
  * Ownership:
- * - Only returns files belonging to authenticated user.
+ * - Only returns files belonging to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -288,10 +295,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const files = await prisma.file.findMany({
         where: {
           userId,
+          workspaceId,
         },
         orderBy: {
           createdAt: "desc",
@@ -324,7 +340,8 @@ router.get(
  * - files.view permission
  *
  * Ownership:
- * - File must belong to authenticated user.
+ * - File must belong to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id/download",
@@ -341,11 +358,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const file = await prisma.file.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -409,12 +435,21 @@ router.post(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const existingFile =
         await prisma.file.findFirst({
           where: {
             id,
             userId,
+            workspaceId,
           },
         });
 
@@ -428,6 +463,7 @@ router.post(
       const relations =
         await validateRelations(
           userId,
+          workspaceId,
           existingFile.clientId,
           existingFile.projectId,
         );
@@ -503,6 +539,7 @@ router.post(
                 null,
 
               userId,
+              workspaceId,
             },
           });
 
@@ -557,11 +594,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const file = await prisma.file.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -630,10 +676,25 @@ router.post(
 
       const data = parsed.data;
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          // Ignore cleanup errors.
+        }
+
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const relations =
         await validateRelations(
           userId,
+          workspaceId,
           data.clientId,
           data.projectId,
         );
@@ -703,6 +764,7 @@ router.post(
               null,
 
             userId,
+            workspaceId,
           },
         });
 
@@ -742,8 +804,10 @@ router.post(
  * - files.update permission
  *
  * Ownership:
- * - Existing file must belong to authenticated user.
- * - Final client/project must belong to authenticated user.
+ * - Existing file must belong to authenticated user
+ *   inside the active workspace.
+ * - Final client/project must belong to authenticated user
+ *   inside the active workspace.
  */
 router.patch(
   "/:id",
@@ -772,12 +836,21 @@ router.patch(
 
       const data = parsed.data;
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const existingFile =
         await prisma.file.findFirst({
           where: {
             id,
             userId,
+            workspaceId,
           },
         });
 
@@ -801,6 +874,7 @@ router.patch(
       const relations =
         await validateRelations(
           userId,
+          workspaceId,
           effectiveClientId,
           effectiveProjectId,
         );
@@ -837,10 +911,6 @@ router.patch(
                 }
               : {}),
 
-            /*
-             * When clientId changes, synchronize the
-             * denormalized client name.
-             */
             ...(data.clientId !== undefined
               ? {
                   clientId:
@@ -853,10 +923,6 @@ router.patch(
                 }
               : {}),
 
-            /*
-             * When projectId changes, synchronize the
-             * denormalized project name.
-             */
             ...(data.projectId !== undefined
               ? {
                   projectId:
@@ -869,10 +935,6 @@ router.patch(
                 }
               : {}),
 
-            /*
-             * If no relation ID is being changed and there
-             * is no linked relation, allow manual text.
-             */
             ...(data.clientId === undefined &&
             data.client !== undefined &&
             effectiveClientId === null
@@ -919,7 +981,8 @@ router.patch(
  * - files.delete permission
  *
  * Ownership:
- * - File must belong to authenticated user.
+ * - File must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -936,12 +999,21 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       const existingFile =
         await prisma.file.findFirst({
           where: {
             id,
             userId,
+            workspaceId,
           },
         });
 

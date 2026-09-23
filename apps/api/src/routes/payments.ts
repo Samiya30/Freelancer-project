@@ -3,7 +3,10 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -40,7 +43,8 @@ function getUserId(req: Request): number {
 }
 
 /**
- * Validates all selected relationships against the authenticated user.
+ * Validates all selected relationships against the authenticated
+ * user's active workspace.
  *
  * Also validates:
  * Client -> Invoice
@@ -49,6 +53,7 @@ function getUserId(req: Request): number {
  */
 async function validateRelations(
   userId: number,
+  workspaceId: number,
   data: {
     clientId?: number | null | undefined;
     invoiceId?: number | null | undefined;
@@ -61,6 +66,7 @@ async function validateRelations(
           where: {
             id: data.clientId,
             userId,
+            workspaceId,
           },
         })
       : null;
@@ -79,6 +85,7 @@ async function validateRelations(
           where: {
             id: data.invoiceId,
             userId,
+            workspaceId,
           },
         })
       : null;
@@ -97,6 +104,7 @@ async function validateRelations(
           where: {
             id: data.projectId,
             userId,
+            workspaceId,
           },
         })
       : null;
@@ -157,7 +165,8 @@ async function validateRelations(
  * - payments.view permission
  *
  * Ownership:
- * - Only returns payments belonging to authenticated user.
+ * - Only returns payments belonging to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -165,10 +174,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const payments = await prisma.payment.findMany({
         where: {
           userId,
+          workspaceId,
         },
         include: {
           clientRecord: true,
@@ -203,7 +221,8 @@ router.get(
  * - payments.view permission
  *
  * Ownership:
- * - Payment must belong to authenticated user.
+ * - Payment must belong to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -211,7 +230,15 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
       const id = Number(req.params.id);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
@@ -224,6 +251,7 @@ router.get(
         where: {
           id,
           userId,
+          workspaceId,
         },
         include: {
           clientRecord: true,
@@ -262,8 +290,8 @@ router.get(
  * - payments.create permission
  *
  * Ownership:
- * - Payment belongs to authenticated user.
- * - All linked records belong to authenticated user.
+ * - Payment belongs to authenticated user and workspace.
+ * - All linked records belong to authenticated user and workspace.
  */
 router.post(
   "/",
@@ -272,8 +300,20 @@ router.post(
     try {
       const data = paymentSchema.parse(req.body);
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
 
-      const relations = await validateRelations(userId, data);
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
+
+      const relations = await validateRelations(
+        userId,
+        workspaceId,
+        data,
+      );
 
       if (data.status === "Completed" && !data.invoiceId) {
         return res.status(400).json({
@@ -296,10 +336,6 @@ router.post(
         });
       }
 
-      /*
-       * If an invoice is supplied, keep the payment's
-       * denormalized display information synchronized with it.
-       */
       const clientName =
         relations.client?.name ?? data.clientName;
 
@@ -321,6 +357,7 @@ router.post(
             method: data.method,
             status: data.status,
             userId,
+            workspaceId,
             clientId: relations.client?.id ?? null,
             invoiceId: relations.invoice?.id ?? null,
             projectId: relations.project?.id ?? null,
@@ -328,7 +365,7 @@ router.post(
         });
 
         /*
-         * Only the validated invoice belonging to this user
+         * Only the validated invoice belonging to this workspace
          * can be marked as Paid.
          */
         if (data.status === "Completed" && relations.invoice) {
@@ -389,8 +426,9 @@ router.post(
  * - payments.update permission
  *
  * Ownership:
- * - Existing payment must belong to authenticated user.
- * - Final client/invoice/project must belong to authenticated user.
+ * - Existing payment must belong to authenticated user
+ *   inside the active workspace.
+ * - Final client/invoice/project must belong to that workspace.
  */
 router.patch(
   "/:id",
@@ -398,7 +436,15 @@ router.patch(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
       const id = Number(req.params.id);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
@@ -413,6 +459,7 @@ router.patch(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -441,11 +488,15 @@ router.patch(
           ? data.projectId
           : existingPayment.projectId;
 
-      const relations = await validateRelations(userId, {
-        clientId: finalClientId,
-        invoiceId: finalInvoiceId,
-        projectId: finalProjectId,
-      });
+      const relations = await validateRelations(
+        userId,
+        workspaceId,
+        {
+          clientId: finalClientId,
+          invoiceId: finalInvoiceId,
+          projectId: finalProjectId,
+        },
+      );
 
       const newStatus =
         data.status ?? existingPayment.status;
@@ -545,10 +596,6 @@ router.patch(
           data: updateData,
         });
 
-        /*
-         * If this payment is now completed, mark its validated
-         * invoice as Paid.
-         */
         if (newStatus === "Completed" && relations.invoice) {
           await tx.invoice.update({
             where: {
@@ -559,14 +606,6 @@ router.patch(
             },
           });
         }
-
-        /*
-         * If the payment was previously Completed and its invoice
-         * is changed, do not automatically alter the old invoice's
-         * status. Invoice status should be managed by invoice/payment
-         * business rules rather than assuming that removing a payment
-         * makes an invoice unpaid.
-         */
 
         return tx.payment.findUnique({
           where: {
@@ -615,7 +654,8 @@ router.patch(
  * - payments.delete permission
  *
  * Ownership:
- * - Payment must belong to authenticated user.
+ * - Payment must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -623,7 +663,15 @@ router.delete(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
       const id = Number(req.params.id);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
@@ -636,6 +684,7 @@ router.delete(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

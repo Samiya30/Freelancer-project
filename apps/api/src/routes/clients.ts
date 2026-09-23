@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -49,10 +52,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const clients = await prisma.client.findMany({
         where: {
           userId,
+          workspaceId,
         },
         orderBy: {
           createdAt: "desc",
@@ -86,6 +98,15 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
+
       const id = Number(req.params.id);
 
       if (!Number.isInteger(id) || id <= 0) {
@@ -99,6 +120,7 @@ router.get(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -147,6 +169,14 @@ router.post(
 
       const data = result.data;
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const client = await prisma.client.create({
         data: {
@@ -157,6 +187,7 @@ router.post(
           projects: data.projects,
           totalRevenue: data.totalRevenue,
           userId,
+          workspaceId,
           ...(data.phone !== undefined && {
             phone: data.phone,
           }),
@@ -191,6 +222,15 @@ router.patch(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
+
       const id = Number(req.params.id);
 
       if (!Number.isInteger(id) || id <= 0) {
@@ -214,6 +254,7 @@ router.patch(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -265,6 +306,15 @@ router.delete(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
+
       const id = Number(req.params.id);
 
       if (!Number.isInteger(id) || id <= 0) {
@@ -278,6 +328,7 @@ router.delete(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

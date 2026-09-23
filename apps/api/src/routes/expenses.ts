@@ -3,7 +3,10 @@ import { z } from "zod";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -46,10 +49,12 @@ function getUserId(req: Request): number {
 }
 
 /**
- * Validate that a project belongs to the authenticated user.
+ * Validate that a project belongs to the authenticated user
+ * and the active workspace.
  */
 async function validateProject(
   userId: number,
+  workspaceId: number,
   projectId: number | null | undefined,
 ) {
   if (projectId === undefined || projectId === null) {
@@ -60,6 +65,7 @@ async function validateProject(
     where: {
       id: projectId,
       userId,
+      workspaceId,
     },
   });
 }
@@ -72,7 +78,8 @@ async function validateProject(
  * - expenses.view permission
  *
  * Ownership:
- * - Only returns expenses belonging to authenticated user.
+ * - Only returns expenses belonging to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -80,10 +87,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const expenses = await prisma.expense.findMany({
         where: {
           userId,
+          workspaceId,
         },
         include: {
           projectRecord: true,
@@ -116,7 +132,8 @@ router.get(
  * - expenses.view permission
  *
  * Ownership:
- * - Expense must belong to authenticated user.
+ * - Expense must belong to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -124,7 +141,15 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
       const id = Number(req.params.id);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
@@ -137,6 +162,7 @@ router.get(
         where: {
           id,
           userId,
+          workspaceId,
         },
         include: {
           projectRecord: true,
@@ -173,8 +199,8 @@ router.get(
  * - expenses.create permission
  *
  * Ownership:
- * - Expense belongs to authenticated user.
- * - Linked project must belong to authenticated user.
+ * - Expense belongs to authenticated user and workspace.
+ * - Linked project must belong to authenticated user and workspace.
  */
 router.post(
   "/",
@@ -183,9 +209,18 @@ router.post(
     try {
       const data = expenseSchema.parse(req.body);
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const project = await validateProject(
         userId,
+        workspaceId,
         data.projectId,
       );
 
@@ -203,13 +238,13 @@ router.post(
       const expense = await prisma.expense.create({
         data: {
           userId,
+          workspaceId,
           title: data.title,
           description: data.description ?? "",
           category: data.category,
           amount: data.amount,
           date: data.date,
           status: data.status,
-
           project: project?.name ?? data.project ?? null,
           vendor: data.vendor ?? null,
           projectId: project?.id ?? null,
@@ -251,8 +286,10 @@ router.post(
  * - expenses.update permission
  *
  * Ownership:
- * - Existing expense must belong to authenticated user.
- * - Final project must belong to authenticated user.
+ * - Existing expense must belong to authenticated user
+ *   inside the active workspace.
+ * - Final project must belong to authenticated user
+ *   inside the active workspace.
  */
 router.patch(
   "/:id",
@@ -260,7 +297,15 @@ router.patch(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
       const id = Number(req.params.id);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
@@ -275,6 +320,7 @@ router.patch(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -289,7 +335,8 @@ router.patch(
        * Resolve the FINAL project after the update.
        *
        * This prevents PATCH requests from accidentally retaining
-       * or assigning a project that does not belong to the user.
+       * or assigning a project that does not belong to the
+       * authenticated user's active workspace.
        */
       const finalProjectId =
         data.projectId !== undefined
@@ -298,6 +345,7 @@ router.patch(
 
       const project = await validateProject(
         userId,
+        workspaceId,
         finalProjectId,
       );
 
@@ -347,7 +395,7 @@ router.patch(
 
           /*
            * If projectId is part of the PATCH:
-           * - validate it against the authenticated user
+           * - validate it against the authenticated user's workspace
            * - store the validated project ID
            * - synchronize the denormalized project name
            */
@@ -405,7 +453,8 @@ router.patch(
  * - expenses.delete permission
  *
  * Ownership:
- * - Expense must belong to authenticated user.
+ * - Expense must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -413,7 +462,15 @@ router.delete(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
       const id = Number(req.params.id);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({
@@ -426,6 +483,7 @@ router.delete(
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

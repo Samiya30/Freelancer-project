@@ -1,8 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import AppShell from "@/components/layout/AppShell";
 import { useToast } from "@/components/ui/ToastProvider";
+
+import {
+  archiveConversation,
+  createConversation,
+  deleteConversation,
+  getConversation,
+  getConversations,
+  markConversationRead,
+  sendMessage,
+  toggleConversationStar,
+  type Conversation,
+  type ConversationWithMessages,
+  type Message,
+} from "@/lib/api/messages";
+
+import {
+  getClients,
+  type ApiClient,
+} from "@/lib/api/clients";
+
 import {
   Search,
   Plus,
@@ -15,335 +40,798 @@ import {
   Archive,
   Trash2,
   CheckCheck,
-  Phone,
   Image as ImageIcon,
   FileText,
   X,
   Users,
   MessageCircle,
-  Clock3,
   Bell,
 } from "lucide-react";
 
-type Message = {
-  id: number;
-  text: string;
-  sender: "me" | "client";
-  time: string;
-  read?: boolean;
-};
+function formatTime(value: string) {
+  const date = new Date(value);
 
-type Conversation = {
-  id: number;
-  name: string;
-  company: string;
-  initials: string;
-  gradient: string;
-  online: boolean;
-  unread: number;
-  starred: boolean;
-  lastMessage: string;
-  lastTime: string;
-  messages: Message[];
-};
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
 
-const initialConversations: Conversation[] = [
-  {
-    id: 1,
-    name: "Rahul Sharma",
-    company: "Acme Corporation",
-    initials: "RS",
-    gradient: "from-violet-500 to-fuchsia-500",
-    online: true,
-    unread: 2,
-    starred: true,
-    lastMessage: "The homepage looks great!",
-    lastTime: "10:42 AM",
-    messages: [
-      {
-        id: 1,
-        text: "Hi! I wanted to check the progress on the website redesign.",
-        sender: "client",
-        time: "10:12 AM",
-      },
-      {
-        id: 2,
-        text: "Hey Rahul! Everything is moving well. I have finished the main homepage and navigation.",
-        sender: "me",
-        time: "10:18 AM",
-        read: true,
-      },
-      {
-        id: 3,
-        text: "The homepage looks great!",
-        sender: "client",
-        time: "10:42 AM",
-      },
-    ],
-  },
-  {
-    id: 2,
-    name: "Ananya Mehta",
-    company: "Nova Labs",
-    initials: "AM",
-    gradient: "from-blue-500 to-cyan-500",
-    online: true,
-    unread: 1,
-    starred: false,
-    lastMessage: "Can we discuss the next milestone?",
-    lastTime: "9:30 AM",
-    messages: [
-      {
-        id: 1,
-        text: "Can we discuss the next milestone?",
-        sender: "client",
-        time: "9:30 AM",
-      },
-    ],
-  },
-  {
-    id: 3,
-    name: "Arjun Kapoor",
-    company: "Bright Studio",
-    initials: "AK",
-    gradient: "from-orange-500 to-pink-500",
-    online: false,
-    unread: 0,
-    starred: true,
-    lastMessage: "Thanks for sending the files.",
-    lastTime: "Yesterday",
-    messages: [
-      {
-        id: 1,
-        text: "I have uploaded the latest brand assets.",
-        sender: "me",
-        time: "Yesterday",
-        read: true,
-      },
-      {
-        id: 2,
-        text: "Thanks for sending the files.",
-        sender: "client",
-        time: "Yesterday",
-      },
-    ],
-  },
-  {
-    id: 4,
-    name: "Priya Verma",
-    company: "Vertex Technologies",
-    initials: "PV",
-    gradient: "from-emerald-500 to-teal-500",
-    online: false,
-    unread: 0,
-    starred: false,
-    lastMessage: "I will review it today.",
-    lastTime: "Yesterday",
-    messages: [
-      {
-        id: 1,
-        text: "The dashboard prototype is ready for review.",
-        sender: "me",
-        time: "Yesterday",
-        read: true,
-      },
-      {
-        id: 2,
-        text: "I will review it today.",
-        sender: "client",
-        time: "Yesterday",
-      },
-    ],
-  },
-  {
-    id: 5,
-    name: "Karan Malhotra",
-    company: "Pixel House",
-    initials: "KM",
-    gradient: "from-indigo-500 to-purple-500",
-    online: false,
-    unread: 0,
-    starred: false,
-    lastMessage: "Perfect, thank you!",
-    lastTime: "Aug 30",
-    messages: [
-      {
-        id: 1,
-        text: "The marketing website has been delivered.",
-        sender: "me",
-        time: "Aug 30",
-        read: true,
-      },
-      {
-        id: 2,
-        text: "Perfect, thank you!",
-        sender: "client",
-        time: "Aug 30",
-      },
-    ],
-  },
-];
+  const now = new Date();
+
+  const isToday =
+    date.toDateString() === now.toDateString();
+
+  if (isToday) {
+    return date.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  if (
+    date.toDateString() ===
+    yesterday.toDateString()
+  ) {
+    return "Yesterday";
+  }
+
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatMessageTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function isToday(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  return (
+    date.toDateString() ===
+    new Date().toDateString()
+  );
+}
 
 export default function MessagesPage() {
   const { showToast } = useToast();
 
-  const [conversations, setConversations] = useState(
-    initialConversations
-  );
+  const [conversations, setConversations] =
+    useState<Conversation[]>([]);
 
-  const [selectedId, setSelectedId] = useState(1);
-  const [search, setSearch] = useState("");
-  const [message, setMessage] = useState("");
-  const [mobileChatOpen, setMobileChatOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [newMessageOpen, setNewMessageOpen] = useState(false);
-
-  const selectedConversation = conversations.find(
-    (conversation) => conversation.id === selectedId
-  );
-
-  const filteredConversations = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    if (!query) return conversations;
-
-    return conversations.filter(
-      (conversation) =>
-        conversation.name.toLowerCase().includes(query) ||
-        conversation.company.toLowerCase().includes(query) ||
-        conversation.lastMessage.toLowerCase().includes(query)
+  const [
+    selectedConversation,
+    setSelectedConversation,
+  ] =
+    useState<ConversationWithMessages | null>(
+      null,
     );
-  }, [conversations, search]);
 
-  const unreadCount = conversations.reduce(
-    (sum, conversation) => sum + conversation.unread,
-    0
-  );
+  const [clients, setClients] =
+    useState<ApiClient[]>([]);
 
-  const starredCount = conversations.filter(
-    (conversation) => conversation.starred
-  ).length;
+  const [selectedId, setSelectedId] =
+    useState<number | null>(null);
 
-  const handleSelectConversation = (id: number) => {
+  const [search, setSearch] =
+    useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const [newMessage, setNewMessage] =
+    useState("");
+
+  const [newClientId, setNewClientId] =
+    useState("");
+
+  const [mobileChatOpen, setMobileChatOpen] =
+    useState(false);
+
+  const [menuOpen, setMenuOpen] =
+    useState(false);
+
+  const [newMessageOpen, setNewMessageOpen] =
+    useState(false);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [
+    conversationLoading,
+    setConversationLoading,
+  ] = useState(false);
+
+  const [sending, setSending] =
+    useState(false);
+
+  const [
+    creatingConversation,
+    setCreatingConversation,
+  ] = useState(false);
+
+  const [actionLoading, setActionLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  /*
+   * Load conversations and clients.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialData() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const [
+          conversationsResponse,
+          clientsResponse,
+        ] = await Promise.all([
+          getConversations(),
+          getClients(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const loadedConversations =
+          conversationsResponse.data ?? [];
+
+        const loadedClients =
+          clientsResponse.data ?? [];
+
+        setConversations(
+          loadedConversations,
+        );
+
+        setClients(
+          loadedClients.filter(
+            (client) =>
+              client.status === "Active",
+          ),
+        );
+
+        if (
+          loadedConversations.length > 0
+        ) {
+          setSelectedId(
+            loadedConversations[0].id,
+          );
+        } else {
+          setSelectedId(null);
+          setSelectedConversation(null);
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error(
+          "Failed to load messages:",
+          err,
+        );
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load messages.",
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadInitialData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Load the selected conversation and its messages.
+   */
+  useEffect(() => {
+    if (selectedId === null) {
+      setSelectedConversation(null);
+      return;
+    }
+
+    /*
+     * Capture the narrowed ID.
+     * This is important because TypeScript
+     * otherwise widens selectedId inside
+     * the async function below.
+     */
+    const conversationId = selectedId;
+
+    let cancelled = false;
+
+    async function loadConversation() {
+      try {
+        setConversationLoading(true);
+
+        const response =
+          await getConversation(
+            conversationId,
+          );
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.data) {
+          throw new Error(
+            "Conversation data was not returned.",
+          );
+        }
+
+        setSelectedConversation(
+          response.data,
+        );
+
+        /*
+         * Mark unread messages as read.
+         */
+        const selected =
+          conversations.find(
+            (conversation) =>
+              conversation.id ===
+              conversationId,
+          );
+
+        if (
+          selected &&
+          selected.unread > 0
+        ) {
+          try {
+            await markConversationRead(
+              conversationId,
+            );
+
+            if (!cancelled) {
+              setConversations(
+                (current) =>
+                  current.map(
+                    (conversation) =>
+                      conversation.id ===
+                      conversationId
+                        ? {
+                            ...conversation,
+                            unread: 0,
+                          }
+                        : conversation,
+                  ),
+              );
+            }
+          } catch (readError) {
+            console.error(
+              "Failed to mark conversation as read:",
+              readError,
+            );
+          }
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error(
+          "Failed to load conversation:",
+          err,
+        );
+
+        showToast(
+          err instanceof Error
+            ? err.message
+            : "Failed to load conversation.",
+          "error",
+        );
+      } finally {
+        if (!cancelled) {
+          setConversationLoading(false);
+        }
+      }
+    }
+
+    void loadConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedId,
+    conversations,
+    showToast,
+  ]);
+
+  const filteredConversations =
+    useMemo(() => {
+      const query =
+        search.trim().toLowerCase();
+
+      if (!query) {
+        return conversations;
+      }
+
+      return conversations.filter(
+        (conversation) =>
+          conversation.name
+            .toLowerCase()
+            .includes(query) ||
+          conversation.company
+            .toLowerCase()
+            .includes(query) ||
+          conversation.lastMessage
+            .toLowerCase()
+            .includes(query),
+      );
+    }, [conversations, search]);
+
+  const unreadCount =
+    conversations.reduce(
+      (sum, conversation) =>
+        sum + conversation.unread,
+      0,
+    );
+
+  const starredCount =
+    conversations.filter(
+      (conversation) =>
+        conversation.starred,
+    ).length;
+
+  const handleSelectConversation = (
+    id: number,
+  ) => {
     setSelectedId(id);
     setMobileChatOpen(true);
-
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === id
-          ? { ...conversation, unread: 0 }
-          : conversation
-      )
-    );
+    setMenuOpen(false);
   };
 
-  const handleSend = () => {
-    const trimmed = message.trim();
+  const handleSend = async () => {
+    const trimmed =
+      message.trim();
 
-    if (!trimmed || !selectedConversation) return;
+    if (
+      !trimmed ||
+      !selectedConversation ||
+      sending
+    ) {
+      return;
+    }
 
-    const newMsg: Message = {
-      id: Date.now(),
-      text: trimmed,
-      sender: "me",
-      time: new Date().toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-      read: true,
-    };
+    try {
+      setSending(true);
 
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === selectedConversation.id
-          ? {
-              ...conversation,
-              lastMessage: trimmed,
-              lastTime: "Just now",
-              messages: [...conversation.messages, newMsg],
-            }
-          : conversation
-      )
-    );
+      const response =
+        await sendMessage(
+          selectedConversation.id,
+          trimmed,
+        );
 
-    setMessage("");
+      if (!response.data) {
+        throw new Error(
+          "Message was not returned by the server.",
+        );
+      }
+
+      const sentMessage =
+        response.data;
+
+      setSelectedConversation(
+        (current) => {
+          if (!current) {
+            return current;
+          }
+
+          return {
+            ...current,
+            lastMessage:
+              sentMessage.text,
+            lastTime:
+              sentMessage.time,
+            messages: [
+              ...current.messages,
+              sentMessage,
+            ],
+          };
+        },
+      );
+
+      setConversations(
+        (current) =>
+          current.map(
+            (conversation) =>
+              conversation.id ===
+              selectedConversation.id
+                ? {
+                    ...conversation,
+                    lastMessage:
+                      sentMessage.text,
+                    lastTime:
+                      sentMessage.time,
+                  }
+                : conversation,
+          ),
+      );
+
+      setMessage("");
+    } catch (err) {
+      console.error(
+        "Failed to send message:",
+        err,
+      );
+
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Failed to send message.",
+        "error",
+      );
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleKeyDown = (
-    event: React.KeyboardEvent<HTMLTextAreaElement>
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
   ) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
       event.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
-  const handleStar = (id: number) => {
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === id
-          ? {
-              ...conversation,
-              starred: !conversation.starred,
-            }
-          : conversation
-      )
-    );
-  };
+  const handleStar = async (
+    id: number,
+  ) => {
+    if (actionLoading) {
+      return;
+    }
 
-  const handleArchive = (id: number) => {
-    setConversations((current) =>
-      current.filter((conversation) => conversation.id !== id)
-    );
+    try {
+      setActionLoading(true);
 
-    setMenuOpen(false);
-    showToast("Conversation archived.", "success");
+      const response =
+        await toggleConversationStar(
+          id,
+        );
 
-    const remaining = conversations.filter(
-      (conversation) => conversation.id !== id
-    );
+      if (!response.data) {
+        throw new Error(
+          "Updated conversation was not returned.",
+        );
+      }
 
-    if (selectedId === id && remaining.length > 0) {
-      setSelectedId(remaining[0].id);
+      const updated =
+        response.data;
+
+      setConversations(
+        (current) =>
+          current.map(
+            (conversation) =>
+              conversation.id === id
+                ? {
+                    ...conversation,
+                    starred:
+                      updated.starred,
+                  }
+                : conversation,
+          ),
+      );
+
+      setSelectedConversation(
+        (current) =>
+          current &&
+          current.id === id
+            ? {
+                ...current,
+                starred:
+                  updated.starred,
+              }
+            : current,
+      );
+    } catch (err) {
+      console.error(
+        "Failed to update star:",
+        err,
+      );
+
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Failed to update conversation.",
+        "error",
+      );
+    } finally {
+      setActionLoading(false);
     }
   };
 
-  const handleDelete = (id: number) => {
-    setConversations((current) =>
-      current.filter((conversation) => conversation.id !== id)
-    );
+  const handleArchive = async (
+    id: number,
+  ) => {
+    if (actionLoading) {
+      return;
+    }
 
-    setMenuOpen(false);
-    showToast("Conversation deleted.", "success");
+    try {
+      setActionLoading(true);
 
-    const remaining = conversations.filter(
-      (conversation) => conversation.id !== id
-    );
+      await archiveConversation(id);
 
-    if (selectedId === id && remaining.length > 0) {
-      setSelectedId(remaining[0].id);
+      const remaining =
+        conversations.filter(
+          (conversation) =>
+            conversation.id !== id,
+        );
+
+      setConversations(
+        remaining,
+      );
+
+      setMenuOpen(false);
+
+      showToast(
+        "Conversation archived.",
+        "success",
+      );
+
+      if (selectedId === id) {
+        const next =
+          remaining[0];
+
+        setSelectedId(
+          next?.id ?? null,
+        );
+
+        if (!next) {
+          setSelectedConversation(
+            null,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        "Failed to archive conversation:",
+        err,
+      );
+
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Failed to archive conversation.",
+        "error",
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDelete = async (
+    id: number,
+  ) => {
+    if (actionLoading) {
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+
+      await deleteConversation(id);
+
+      const remaining =
+        conversations.filter(
+          (conversation) =>
+            conversation.id !== id,
+        );
+
+      setConversations(
+        remaining,
+      );
+
+      setMenuOpen(false);
+
+      showToast(
+        "Conversation deleted.",
+        "success",
+      );
+
+      if (selectedId === id) {
+        const next =
+          remaining[0];
+
+        setSelectedId(
+          next?.id ?? null,
+        );
+
+        if (!next) {
+          setSelectedConversation(
+            null,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        "Failed to delete conversation:",
+        err,
+      );
+
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Failed to delete conversation.",
+        "error",
+      );
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handleAttachment = () => {
     showToast(
       "File attachments will connect to storage in the next phase.",
-      "info"
+      "info",
     );
   };
 
   const handleEmoji = () => {
-    setMessage((current) => `${current} 😊`);
+    setMessage(
+      (current) =>
+        `${current} 😊`,
+    );
   };
 
   const handleVideo = () => {
-    showToast("Video calling will be available in a later phase.", "info");
+    showToast(
+      "Video calling will be available in a later phase.",
+      "info",
+    );
   };
 
-  const handleNewMessage = () => {
-    setNewMessageOpen(false);
-    showToast("New conversation flow is ready for backend integration.", "info");
-  };
+  const handleCreateConversation =
+    async () => {
+      const trimmed =
+        newMessage.trim();
+
+      const clientId =
+        Number(newClientId);
+
+      if (
+        !clientId ||
+        !trimmed ||
+        creatingConversation
+      ) {
+        return;
+      }
+
+      try {
+        setCreatingConversation(
+          true,
+        );
+
+        const response =
+          await createConversation(
+            clientId,
+            trimmed,
+          );
+
+        if (!response.data) {
+          throw new Error(
+            "Conversation was not returned by the server.",
+          );
+        }
+
+        const created =
+          response.data;
+
+        const summary: Conversation =
+          {
+            id: created.id,
+            name: created.name,
+            company:
+              created.company,
+            initials:
+              created.initials,
+            gradient:
+              created.gradient,
+            online:
+              created.online,
+            unread:
+              created.unread,
+            starred:
+              created.starred,
+            archived:
+              created.archived,
+            lastMessage:
+              created.lastMessage,
+            lastTime:
+              created.lastTime,
+            workspaceId:
+              created.workspaceId,
+            userId:
+              created.userId,
+            clientId:
+              created.clientId,
+            createdAt:
+              created.createdAt,
+            updatedAt:
+              created.updatedAt,
+          };
+
+        setConversations(
+          (current) => [
+            summary,
+            ...current,
+          ],
+        );
+
+        setSelectedId(
+          created.id,
+        );
+
+        setSelectedConversation(
+          created,
+        );
+
+        setNewMessageOpen(
+          false,
+        );
+
+        setNewClientId("");
+        setNewMessage("");
+
+        setMobileChatOpen(true);
+
+        showToast(
+          "Conversation created successfully.",
+          "success",
+        );
+      } catch (err) {
+        console.error(
+          "Failed to create conversation:",
+          err,
+        );
+
+        showToast(
+          err instanceof Error
+            ? err.message
+            : "Failed to create conversation.",
+          "error",
+        );
+      } finally {
+        setCreatingConversation(
+          false,
+        );
+      }
+    };
 
   return (
     <AppShell>
@@ -368,7 +856,9 @@ export default function MessagesPage() {
               </div>
 
               <button
-                onClick={() => setNewMessageOpen(true)}
+                onClick={() =>
+                  setNewMessageOpen(true)
+                }
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:-translate-y-0.5 hover:shadow-xl"
               >
                 <Plus className="h-4 w-4" />
@@ -436,12 +926,20 @@ export default function MessagesPage() {
             </div>
           </div>
 
+          {error && (
+            <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+              {error}
+            </div>
+          )}
+
           {/* Messaging Workspace */}
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
             {/* Conversations */}
             <aside
               className={`w-full shrink-0 border-r border-slate-200 bg-white lg:block lg:w-[360px] ${
-                mobileChatOpen ? "hidden" : "block"
+                mobileChatOpen
+                  ? "hidden"
+                  : "block"
               }`}
             >
               <div className="border-b border-slate-100 p-4">
@@ -450,7 +948,11 @@ export default function MessagesPage() {
 
                   <input
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(event) =>
+                      setSearch(
+                        event.target.value,
+                      )
+                    }
                     placeholder="Search conversations..."
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
                   />
@@ -458,87 +960,137 @@ export default function MessagesPage() {
               </div>
 
               <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
-                {filteredConversations.map((conversation) => {
-                  const active =
-                    conversation.id === selectedId;
+                {loading ? (
+                  <div className="space-y-3 p-4">
+                    {Array.from({
+                      length: 5,
+                    }).map(
+                      (_, index) => (
+                        <div
+                          key={index}
+                          className="flex animate-pulse gap-3 rounded-xl p-2"
+                        >
+                          <div className="h-12 w-12 rounded-2xl bg-slate-200" />
 
-                  return (
-                    <button
-                      key={conversation.id}
-                      onClick={() =>
-                        handleSelectConversation(conversation.id)
-                      }
-                      className={`w-full border-b border-slate-100 p-4 text-left transition ${
-                        active
-                          ? "bg-gradient-to-r from-indigo-50 to-violet-50"
-                          : "hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex gap-3">
-                        <div className="relative shrink-0">
-                          <div
-                            className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${conversation.gradient} text-sm font-bold text-white shadow-sm`}
-                          >
-                            {conversation.initials}
-                          </div>
-
-                          {conversation.online && (
-                            <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <h3 className="truncate text-sm font-bold text-slate-900">
-                                {conversation.name}
-                              </h3>
-
-                              <p className="mt-0.5 truncate text-xs text-slate-400">
-                                {conversation.company}
-                              </p>
-                            </div>
-
-                            <span className="shrink-0 text-[10px] text-slate-400">
-                              {conversation.lastTime}
-                            </span>
-                          </div>
-
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <p className="truncate text-xs text-slate-500">
-                              {conversation.lastMessage}
-                            </p>
-
-                            <div className="flex shrink-0 items-center gap-1">
-                              {conversation.starred && (
-                                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                              )}
-
-                              {conversation.unread > 0 && (
-                                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[10px] font-bold text-white">
-                                  {conversation.unread}
-                                </span>
-                              )}
-                            </div>
+                          <div className="flex-1 space-y-2">
+                            <div className="h-3 w-32 rounded bg-slate-200" />
+                            <div className="h-3 w-24 rounded bg-slate-100" />
+                            <div className="h-3 w-full rounded bg-slate-100" />
                           </div>
                         </div>
-                      </div>
-                    </button>
-                  );
-                })}
-
-                {filteredConversations.length === 0 && (
-                  <div className="p-8 text-center">
-                    <MessageCircle className="mx-auto h-8 w-8 text-slate-300" />
-
-                    <p className="mt-3 text-sm font-semibold text-slate-700">
-                      No conversations found
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-400">
-                      Try a different search.
-                    </p>
+                      ),
+                    )}
                   </div>
+                ) : (
+                  <>
+                    {filteredConversations.map(
+                      (
+                        conversation,
+                      ) => {
+                        const active =
+                          conversation.id ===
+                          selectedId;
+
+                        return (
+                          <button
+                            key={
+                              conversation.id
+                            }
+                            onClick={() =>
+                              handleSelectConversation(
+                                conversation.id,
+                              )
+                            }
+                            className={`w-full border-b border-slate-100 p-4 text-left transition ${
+                              active
+                                ? "bg-gradient-to-r from-indigo-50 to-violet-50"
+                                : "hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="flex gap-3">
+                              <div className="relative shrink-0">
+                                <div
+                                  className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${conversation.gradient} text-sm font-bold text-white shadow-sm`}
+                                >
+                                  {
+                                    conversation.initials
+                                  }
+                                </div>
+
+                                {conversation.online && (
+                                  <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <h3 className="truncate text-sm font-bold text-slate-900">
+                                      {
+                                        conversation.name
+                                      }
+                                    </h3>
+
+                                    <p className="mt-0.5 truncate text-xs text-slate-400">
+                                      {
+                                        conversation.company
+                                      }
+                                    </p>
+                                  </div>
+
+                                  <span className="shrink-0 text-[10px] text-slate-400">
+                                    {formatTime(
+                                      conversation.lastTime,
+                                    )}
+                                  </span>
+                                </div>
+
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                  <p className="truncate text-xs text-slate-500">
+                                    {
+                                      conversation.lastMessage
+                                    }
+                                  </p>
+
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    {conversation.starred && (
+                                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                                    )}
+
+                                    {conversation.unread >
+                                      0 && (
+                                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[10px] font-bold text-white">
+                                        {
+                                          conversation.unread
+                                        }
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      },
+                    )}
+
+                    {filteredConversations.length ===
+                      0 && (
+                      <div className="p-8 text-center">
+                        <MessageCircle className="mx-auto h-8 w-8 text-slate-300" />
+
+                        <p className="mt-3 text-sm font-semibold text-slate-700">
+                          No conversations found
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-400">
+                          {search.trim()
+                            ? "Try a different search."
+                            : "Start a new conversation to begin messaging."}
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </aside>
@@ -546,16 +1098,32 @@ export default function MessagesPage() {
             {/* Chat */}
             <section
               className={`min-w-0 flex-1 flex-col ${
-                mobileChatOpen ? "flex" : "hidden lg:flex"
+                mobileChatOpen
+                  ? "flex"
+                  : "hidden lg:flex"
               }`}
             >
-              {selectedConversation ? (
+              {conversationLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center">
+                    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+
+                    <p className="mt-3 text-sm font-medium text-slate-500">
+                      Loading conversation...
+                    </p>
+                  </div>
+                </div>
+              ) : selectedConversation ? (
                 <>
                   {/* Chat Header */}
                   <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
                     <div className="flex min-w-0 items-center gap-3">
                       <button
-                        onClick={() => setMobileChatOpen(false)}
+                        onClick={() =>
+                          setMobileChatOpen(
+                            false,
+                          )
+                        }
                         className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
                       >
                         <X className="h-5 w-5" />
@@ -564,13 +1132,17 @@ export default function MessagesPage() {
                       <div
                         className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${selectedConversation.gradient} text-sm font-bold text-white shadow-sm`}
                       >
-                        {selectedConversation.initials}
+                        {
+                          selectedConversation.initials
+                        }
                       </div>
 
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">
-                            {selectedConversation.name}
+                            {
+                              selectedConversation.name
+                            }
                           </h2>
 
                           {selectedConversation.online && (
@@ -581,7 +1153,9 @@ export default function MessagesPage() {
                         </div>
 
                         <p className="truncate text-xs text-slate-400">
-                          {selectedConversation.company}
+                          {
+                            selectedConversation.company
+                          }
                         </p>
                       </div>
                     </div>
@@ -597,9 +1171,14 @@ export default function MessagesPage() {
 
                       <button
                         onClick={() =>
-                          handleStar(selectedConversation.id)
+                          void handleStar(
+                            selectedConversation.id,
+                          )
                         }
-                        className="rounded-xl p-2.5 text-slate-400 hover:bg-slate-100 hover:text-amber-500"
+                        disabled={
+                          actionLoading
+                        }
+                        className="rounded-xl p-2.5 text-slate-400 hover:bg-slate-100 hover:text-amber-500 disabled:opacity-50"
                         title="Star"
                       >
                         <Star
@@ -613,7 +1192,12 @@ export default function MessagesPage() {
 
                       <div className="relative">
                         <button
-                          onClick={() => setMenuOpen(!menuOpen)}
+                          onClick={() =>
+                            setMenuOpen(
+                              (current) =>
+                                !current,
+                            )
+                          }
                           className="rounded-xl p-2.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                         >
                           <MoreHorizontal className="h-4 w-4" />
@@ -623,9 +1207,14 @@ export default function MessagesPage() {
                           <div className="absolute right-0 top-11 z-30 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
                             <button
                               onClick={() =>
-                                handleArchive(selectedConversation.id)
+                                void handleArchive(
+                                  selectedConversation.id,
+                                )
                               }
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              disabled={
+                                actionLoading
+                              }
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                             >
                               <Archive className="h-3.5 w-3.5" />
                               Archive
@@ -633,9 +1222,14 @@ export default function MessagesPage() {
 
                             <button
                               onClick={() =>
-                                handleDelete(selectedConversation.id)
+                                void handleDelete(
+                                  selectedConversation.id,
+                                )
                               }
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                              disabled={
+                                actionLoading
+                              }
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               Delete
@@ -651,52 +1245,91 @@ export default function MessagesPage() {
                     <div className="mx-auto max-w-3xl space-y-5">
                       <div className="flex justify-center">
                         <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold text-slate-400 shadow-sm">
-                          Today
+                          {selectedConversation.messages.some(
+                            (item) =>
+                              isToday(
+                                item.time,
+                              ),
+                          )
+                            ? "Today"
+                            : formatTime(
+                                selectedConversation
+                                  .messages[0]
+                                  ?.time ??
+                                  selectedConversation.createdAt,
+                              )}
                         </span>
                       </div>
 
-                      {selectedConversation.messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`flex ${
-                            msg.sender === "me"
-                              ? "justify-end"
-                              : "justify-start"
-                          }`}
-                        >
+                      {selectedConversation.messages.map(
+                        (msg: Message) => (
                           <div
-                            className={`max-w-[82%] sm:max-w-[70%] ${
-                              msg.sender === "me"
-                                ? "items-end"
-                                : "items-start"
-                            } flex flex-col`}
+                            key={msg.id}
+                            className={`flex ${
+                              msg.sender ===
+                              "me"
+                                ? "justify-end"
+                                : "justify-start"
+                            }`}
                           >
                             <div
-                              className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
-                                msg.sender === "me"
-                                  ? "rounded-br-md bg-gradient-to-r from-indigo-600 to-violet-600 text-white"
-                                  : "rounded-bl-md border border-slate-200 bg-white text-slate-700"
+                              className={`flex max-w-[82%] flex-col sm:max-w-[70%] ${
+                                msg.sender ===
+                                "me"
+                                  ? "items-end"
+                                  : "items-start"
                               }`}
                             >
-                              {msg.text}
-                            </div>
+                              <div
+                                className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
+                                  msg.sender ===
+                                  "me"
+                                    ? "rounded-br-md bg-gradient-to-r from-indigo-600 to-violet-600 text-white"
+                                    : "rounded-bl-md border border-slate-200 bg-white text-slate-700"
+                                }`}
+                              >
+                                {msg.text}
+                              </div>
 
-                            <div
-                              className={`mt-1.5 flex items-center gap-1.5 px-1 text-[10px] text-slate-400 ${
-                                msg.sender === "me"
-                                  ? "justify-end"
-                                  : "justify-start"
-                              }`}
-                            >
-                              <span>{msg.time}</span>
+                              <div
+                                className={`mt-1.5 flex items-center gap-1.5 px-1 text-[10px] text-slate-400 ${
+                                  msg.sender ===
+                                  "me"
+                                    ? "justify-end"
+                                    : "justify-start"
+                                }`}
+                              >
+                                <span>
+                                  {formatMessageTime(
+                                    msg.time,
+                                  )}
+                                </span>
 
-                              {msg.sender === "me" && msg.read && (
-                                <CheckCheck className="h-3.5 w-3.5 text-indigo-500" />
-                              )}
+                                {msg.sender ===
+                                  "me" &&
+                                  msg.read && (
+                                    <CheckCheck className="h-3.5 w-3.5 text-indigo-500" />
+                                  )}
+                              </div>
                             </div>
                           </div>
+                        ),
+                      )}
+
+                      {selectedConversation.messages.length ===
+                        0 && (
+                        <div className="py-16 text-center">
+                          <MessageCircle className="mx-auto h-8 w-8 text-slate-300" />
+
+                          <p className="mt-3 text-sm font-semibold text-slate-700">
+                            No messages yet
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-400">
+                            Send the first message below.
+                          </p>
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
 
@@ -706,17 +1339,27 @@ export default function MessagesPage() {
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-sm focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100">
                         <textarea
                           value={message}
-                          onChange={(e) => setMessage(e.target.value)}
-                          onKeyDown={handleKeyDown}
+                          onChange={(event) =>
+                            setMessage(
+                              event.target
+                                .value,
+                            )
+                          }
+                          onKeyDown={
+                            handleKeyDown
+                          }
                           rows={2}
+                          disabled={sending}
                           placeholder={`Message ${selectedConversation.name.split(" ")[0]}...`}
-                          className="w-full resize-none bg-transparent px-2 py-1 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                          className="w-full resize-none bg-transparent px-2 py-1 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:opacity-60"
                         />
 
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={handleAttachment}
+                              onClick={
+                                handleAttachment
+                              }
                               className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600"
                               title="Attach file"
                             >
@@ -724,7 +1367,9 @@ export default function MessagesPage() {
                             </button>
 
                             <button
-                              onClick={handleAttachment}
+                              onClick={
+                                handleAttachment
+                              }
                               className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-indigo-600"
                               title="Add image"
                             >
@@ -732,7 +1377,9 @@ export default function MessagesPage() {
                             </button>
 
                             <button
-                              onClick={handleEmoji}
+                              onClick={
+                                handleEmoji
+                              }
                               className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-amber-500"
                               title="Emoji"
                             >
@@ -741,12 +1388,26 @@ export default function MessagesPage() {
                           </div>
 
                           <button
-                            onClick={handleSend}
-                            disabled={!message.trim()}
+                            onClick={() =>
+                              void handleSend()
+                            }
+                            disabled={
+                              !message.trim() ||
+                              sending
+                            }
                             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-200 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            <Send className="h-3.5 w-3.5" />
-                            Send
+                            {sending ? (
+                              <>
+                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                                Sending
+                              </>
+                            ) : (
+                              <>
+                                <Send className="h-3.5 w-3.5" />
+                                Send
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -768,8 +1429,7 @@ export default function MessagesPage() {
                   </h2>
 
                   <p className="mt-1 max-w-sm text-sm text-slate-500">
-                    Choose a client conversation from the left to start
-                    messaging.
+                    Choose a client conversation from the left to start messaging.
                   </p>
                 </div>
               )}
@@ -790,8 +1450,7 @@ export default function MessagesPage() {
                   </p>
 
                   <p className="mt-0.5 text-xs text-indigo-100">
-                    Files, tasks, contracts and client messages will work
-                    together in the full workspace.
+                    Files, tasks, contracts and client messages will work together in the full workspace.
                   </p>
                 </div>
               </div>
@@ -824,7 +1483,11 @@ export default function MessagesPage() {
                   </div>
 
                   <button
-                    onClick={() => setNewMessageOpen(false)}
+                    onClick={() =>
+                      setNewMessageOpen(
+                        false,
+                      )
+                    }
                     className="rounded-xl bg-white/10 p-2 hover:bg-white/20"
                   >
                     <X className="h-5 w-5" />
@@ -838,18 +1501,39 @@ export default function MessagesPage() {
                     Client
                   </label>
 
-                  <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100">
-                    <option>Select a client</option>
+                  <select
+                    value={newClientId}
+                    onChange={(event) =>
+                      setNewClientId(
+                        event.target
+                          .value,
+                      )
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+                  >
+                    <option value="">
+                      Select a client
+                    </option>
 
-                    {conversations.map((conversation) => (
-                      <option
-                        key={conversation.id}
-                        value={conversation.id}
-                      >
-                        {conversation.name} — {conversation.company}
-                      </option>
-                    ))}
+                    {clients.map(
+                      (client) => (
+                        <option
+                          key={client.id}
+                          value={client.id}
+                        >
+                          {client.name} —{" "}
+                          {client.company}
+                        </option>
+                      ),
+                    )}
                   </select>
+
+                  {clients.length ===
+                    0 && (
+                    <p className="mt-2 text-xs text-amber-600">
+                      No active clients are available.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -858,6 +1542,13 @@ export default function MessagesPage() {
                   </label>
 
                   <textarea
+                    value={newMessage}
+                    onChange={(event) =>
+                      setNewMessage(
+                        event.target
+                          .value,
+                      )
+                    }
                     rows={5}
                     placeholder="Write your message..."
                     className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
@@ -866,17 +1557,30 @@ export default function MessagesPage() {
 
                 <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                   <button
-                    onClick={() => setNewMessageOpen(false)}
+                    onClick={() =>
+                      setNewMessageOpen(
+                        false,
+                      )
+                    }
                     className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
                   >
                     Cancel
                   </button>
 
                   <button
-                    onClick={handleNewMessage}
-                    className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200"
+                    onClick={() =>
+                      void handleCreateConversation()
+                    }
+                    disabled={
+                      !newClientId ||
+                      !newMessage.trim() ||
+                      creatingConversation
+                    }
+                    className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-200 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Start Conversation
+                    {creatingConversation
+                      ? "Creating..."
+                      : "Start Conversation"}
                   </button>
                 </div>
               </div>

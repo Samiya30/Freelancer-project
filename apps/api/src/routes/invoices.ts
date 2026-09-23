@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -59,11 +62,12 @@ function getUserId(req: Request): number {
 /**
  * Validate client/project ownership and their relationship.
  *
- * Both records must belong to the authenticated user.
- * If both are selected, the project must belong to that client.
+ * Both records must belong to the authenticated user
+ * and the active workspace.
  */
 async function validateRelations(
   userId: number,
+  workspaceId: number,
   clientId: number | null | undefined,
   projectId: number | null | undefined,
 ) {
@@ -75,6 +79,7 @@ async function validateRelations(
       where: {
         id: clientId,
         userId,
+        workspaceId,
       },
     });
 
@@ -88,6 +93,7 @@ async function validateRelations(
       where: {
         id: projectId,
         userId,
+        workspaceId,
       },
     });
 
@@ -118,7 +124,8 @@ async function validateRelations(
  * - invoices.view permission
  *
  * Ownership:
- * - Only returns invoices belonging to the authenticated user.
+ * - Only returns invoices belonging to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -126,10 +133,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const invoices = await prisma.invoice.findMany({
         where: {
           userId,
+          workspaceId,
         },
         include: {
           items: true,
@@ -162,7 +178,8 @@ router.get(
  * - invoices.view permission
  *
  * Ownership:
- * - Invoice must belong to authenticated user.
+ * - Invoice must belong to authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -179,11 +196,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const invoice = await prisma.invoice.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
         include: {
           items: true,
@@ -220,8 +246,8 @@ router.get(
  * - invoices.create permission
  *
  * Ownership:
- * - Invoice belongs to authenticated user.
- * - Client/project must belong to authenticated user.
+ * - Invoice belongs to authenticated user and workspace.
+ * - Client/project must belong to authenticated user and workspace.
  * - Client/project relationship must be valid.
  */
 router.post(
@@ -241,9 +267,18 @@ router.post(
 
       const data = parsed.data;
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const { client, project } = await validateRelations(
         userId,
+        workspaceId,
         data.clientId,
         data.projectId,
       );
@@ -303,6 +338,7 @@ router.post(
           tax: data.tax ?? 0,
           discount: data.discount ?? 0,
           userId,
+          workspaceId,
           clientId: client?.id ?? data.clientId ?? null,
           projectId: project?.id ?? data.projectId ?? null,
           ...(data.items && data.items.length > 0
@@ -349,8 +385,10 @@ router.post(
  * - invoices.update permission
  *
  * Ownership:
- * - Existing invoice must belong to authenticated user.
- * - Client/project must belong to authenticated user.
+ * - Existing invoice must belong to authenticated user
+ *   inside the active workspace.
+ * - Client/project must belong to authenticated user
+ *   inside the active workspace.
  * - Final client/project relationship must remain valid.
  */
 router.patch(
@@ -379,11 +417,20 @@ router.patch(
 
       const data = parsed.data;
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingInvoice = await prisma.invoice.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -396,9 +443,6 @@ router.patch(
 
       /*
        * Resolve the FINAL client/project relationship.
-       *
-       * This is important when only one side of the relationship
-       * is changed during PATCH.
        */
       const finalClientId =
         data.clientId !== undefined
@@ -412,6 +456,7 @@ router.patch(
 
       const { client, project } = await validateRelations(
         userId,
+        workspaceId,
         finalClientId,
         finalProjectId,
       );
@@ -518,10 +563,6 @@ router.patch(
         if (data.clientId !== undefined) {
           updateData.clientId = data.clientId;
 
-          /*
-           * Keep denormalized client fields synchronized when
-           * a real client relation is selected.
-           */
           if (client) {
             updateData.client = client.name;
             updateData.clientEmail = client.email;
@@ -531,10 +572,6 @@ router.patch(
         if (data.projectId !== undefined) {
           updateData.projectId = data.projectId;
 
-          /*
-           * Keep denormalized project name synchronized when
-           * a real project relation is selected.
-           */
           if (project) {
             updateData.project = project.name;
           }
@@ -588,7 +625,8 @@ router.patch(
  * - invoices.delete permission
  *
  * Ownership:
- * - Invoice must belong to authenticated user.
+ * - Invoice must belong to authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -605,11 +643,20 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const invoice = await prisma.invoice.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 

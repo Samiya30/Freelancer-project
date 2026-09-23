@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -29,7 +32,8 @@ function getUserId(req: Request): number {
  * - Authentication
  * - dashboard.view permission
  *
- * All dashboard data is scoped to the authenticated user.
+ * All dashboard data is scoped to the authenticated
+ * user and the active workspace.
  */
 router.get(
   "/",
@@ -52,6 +56,15 @@ router.get(
       }
 
       const userId = getUserId(req);
+
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
 
       /*
        * Dashboard date ranges.
@@ -97,6 +110,7 @@ router.get(
         prisma.payment.findMany({
           where: {
             userId,
+            workspaceId,
             status: "Completed",
             date: {
               gte: currentMonthStart,
@@ -111,6 +125,7 @@ router.get(
         prisma.invoice.findMany({
           where: {
             userId,
+            workspaceId,
             status: {
               in: ["Sent", "Viewed", "Overdue"],
             },
@@ -132,6 +147,7 @@ router.get(
         prisma.client.count({
           where: {
             userId,
+            workspaceId,
             status: "Active",
           },
         }),
@@ -139,6 +155,7 @@ router.get(
         prisma.timeEntry.findMany({
           where: {
             userId,
+            workspaceId,
             date: {
               gte: currentMonthStart,
               lt: nextMonthStart,
@@ -152,6 +169,7 @@ router.get(
         prisma.payment.findMany({
           where: {
             userId,
+            workspaceId,
             status: "Completed",
             date: {
               gte: yearStart,
@@ -170,6 +188,7 @@ router.get(
         prisma.project.findMany({
           where: {
             userId,
+            workspaceId,
             status: {
               in: [
                 "Planning",
@@ -197,6 +216,7 @@ router.get(
         prisma.invoice.findMany({
           where: {
             userId,
+            workspaceId,
           },
           select: {
             id: true,

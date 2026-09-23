@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -29,7 +32,8 @@ function getUserId(req: Request): number {
  * - Authentication
  * - reports.view permission
  *
- * All returned records are scoped to the authenticated user.
+ * All returned records are scoped to the authenticated
+ * user and the active workspace.
  */
 router.get(
   "/",
@@ -53,6 +57,15 @@ router.get(
 
       const userId = getUserId(req);
 
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found.",
+        });
+      }
+
       const startDate = new Date(
         `${yearValue}-01-01T00:00:00.000Z`,
       );
@@ -71,6 +84,7 @@ router.get(
         prisma.project.findMany({
           where: {
             userId,
+            workspaceId,
           },
           orderBy: {
             createdAt: "desc",
@@ -80,6 +94,7 @@ router.get(
         prisma.invoice.findMany({
           where: {
             userId,
+            workspaceId,
             issueDate: {
               gte: startDate,
               lt: endDate,
@@ -93,6 +108,7 @@ router.get(
         prisma.payment.findMany({
           where: {
             userId,
+            workspaceId,
             date: {
               gte: startDate,
               lt: endDate,
@@ -106,6 +122,7 @@ router.get(
         prisma.expense.findMany({
           where: {
             userId,
+            workspaceId,
             date: {
               gte: startDate,
               lt: endDate,
@@ -119,6 +136,7 @@ router.get(
         prisma.client.findMany({
           where: {
             userId,
+            workspaceId,
           },
           orderBy: {
             createdAt: "desc",

@@ -2,7 +2,10 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requirePermission } from "../middleware/permissions.js";
+import {
+  getWorkspaceId,
+  requirePermission,
+} from "../middleware/permissions.js";
 
 const router = Router();
 
@@ -61,6 +64,7 @@ function getUserId(req: Request): number {
 
 async function validateClient(
   userId: number,
+  workspaceId: number,
   clientId: number | null | undefined,
 ) {
   if (clientId === undefined || clientId === null) {
@@ -71,6 +75,7 @@ async function validateClient(
     where: {
       id: clientId,
       userId,
+      workspaceId,
     },
   });
 }
@@ -83,7 +88,8 @@ async function validateClient(
  * - proposals.view permission
  *
  * Ownership:
- * - Only returns proposals belonging to the authenticated user.
+ * - Only returns proposals belonging to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/",
@@ -91,10 +97,19 @@ router.get(
   async (req, res) => {
     try {
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const proposals = await prisma.proposal.findMany({
         where: {
           userId,
+          workspaceId,
         },
         include: {
           clientRecord: true,
@@ -127,7 +142,8 @@ router.get(
  * - proposals.view permission
  *
  * Ownership:
- * - The proposal must belong to the authenticated user.
+ * - The proposal must belong to the authenticated user
+ *   inside the active workspace.
  */
 router.get(
   "/:id",
@@ -144,11 +160,20 @@ router.get(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const proposal = await prisma.proposal.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
         include: {
           clientRecord: true,
@@ -185,8 +210,8 @@ router.get(
  * - proposals.create permission
  *
  * Ownership:
- * - New proposal is assigned to the authenticated user.
- * - clientId must belong to the authenticated user.
+ * - New proposal is assigned to the authenticated user and workspace.
+ * - clientId must belong to the authenticated user's workspace.
  */
 router.post(
   "/",
@@ -204,8 +229,20 @@ router.post(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
 
-      const client = await validateClient(userId, parsed.data.clientId);
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
+
+      const client = await validateClient(
+        userId,
+        workspaceId,
+        parsed.data.clientId,
+      );
 
       if (parsed.data.clientId !== undefined && !client) {
         return res.status(400).json({
@@ -220,11 +257,15 @@ router.post(
 
       const validUntil = parsed.data.validUntil
         ? new Date(parsed.data.validUntil)
-        : new Date(issueDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+        : new Date(
+            issueDate.getTime() +
+              30 * 24 * 60 * 60 * 1000,
+          );
 
       const proposal = await prisma.proposal.create({
         data: {
           userId,
+          workspaceId,
           number: parsed.data.number,
           title: parsed.data.title,
           client: parsed.data.client,
@@ -266,8 +307,9 @@ router.post(
  * - proposals.update permission
  *
  * Ownership:
- * - Existing proposal must belong to the authenticated user.
- * - New clientId must also belong to the authenticated user.
+ * - Existing proposal must belong to the authenticated user
+ *   inside the active workspace.
+ * - New clientId must also belong to the same workspace.
  */
 router.patch(
   "/:id",
@@ -294,11 +336,20 @@ router.patch(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingProposal = await prisma.proposal.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
@@ -312,6 +363,7 @@ router.patch(
       if (parsed.data.clientId !== undefined) {
         const client = await validateClient(
           userId,
+          workspaceId,
           parsed.data.clientId,
         );
 
@@ -403,7 +455,8 @@ router.patch(
  * - proposals.delete permission
  *
  * Ownership:
- * - Existing proposal must belong to the authenticated user.
+ * - Existing proposal must belong to the authenticated user
+ *   inside the active workspace.
  */
 router.delete(
   "/:id",
@@ -420,11 +473,20 @@ router.delete(
       }
 
       const userId = getUserId(req);
+      const workspaceId = await getWorkspaceId(userId);
+
+      if (workspaceId === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No active workspace membership found",
+        });
+      }
 
       const existingProposal = await prisma.proposal.findFirst({
         where: {
           id,
           userId,
+          workspaceId,
         },
       });
 
