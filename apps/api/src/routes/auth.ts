@@ -19,8 +19,21 @@ import {
   type AuthenticatedRequest,
 } from "../middleware/auth.js";
 import { getAuthorizationContext } from "../middleware/permissions.js";
+import { createRateLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
+
+const loginRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 10,
+  message: "Too many login attempts. Please try again later.",
+});
+
+const registrationRateLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  maxRequests: 5,
+  message: "Too many registration attempts. Please try again later.",
+});
 
 const permissionDefinitions = [
   // Dashboard
@@ -399,6 +412,7 @@ async function bootstrapWorkspace(
  */
 router.post(
   "/register",
+  registrationRateLimiter,
   async (req, res, next) => {
     try {
       const {
@@ -602,6 +616,7 @@ router.post(
  */
 router.post(
   "/login",
+  loginRateLimiter,
   async (req, res, next) => {
     try {
       const {
