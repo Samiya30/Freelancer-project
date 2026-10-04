@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 
 import { prisma } from "../lib/prisma.js";
@@ -8,8 +9,6 @@ import {
 } from "../middleware/auth.js";
 
 const router = Router();
-
-router.use(requireAuth);
 
 function getUserId(req: AuthenticatedRequest): number {
   if (!Number.isInteger(req.userId) || req.userId <= 0) {
@@ -229,618 +228,1308 @@ function parsePermissionIds(
 
 /*
 |--------------------------------------------------------------------------
-| GET MEMBERS
+| WORKSPACE INVITATIONS
 |--------------------------------------------------------------------------
 */
 
-router.get("/", async (req, res) => {
-  try {
-    const member = await requireCurrentMember(
-      req,
-      res,
-    );
+const INVITATION_EXPIRY_DAYS = 7;
 
-    if (!member) {
-      return;
-    }
+function normalizeInvitationEmail(
+  value: unknown,
+): string {
+  return typeof value === "string"
+    ? value.trim().toLowerCase()
+    : "";
+}
 
-    const permissions =
-      await getEffectivePermissionKeys(
-        member.id,
-        member.roleId,
-      );
+function isValidInvitationEmail(
+  email: string,
+): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email,
+  );
+}
 
-    if (
-      !hasPermission(
-        permissions,
-        "members.view",
-      )
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not have permission to view members.",
-      });
+function createInvitationToken(): string {
+  return randomBytes(32).toString("hex");
+}
 
-      return;
-    }
+function hashInvitationToken(
+  token: string,
+): string {
+  return createHash("sha256")
+    .update(token)
+    .digest("hex");
+}
 
-    const members =
-      await prisma.workspaceMember.findMany({
-        where: {
-          workspaceId: member.workspaceId,
-        },
+function getInvitationExpiryDate(): Date {
+  const expiresAt = new Date();
 
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-              phone: true,
-              bio: true,
-              createdAt: true,
-              updatedAt: true,
-            },
-          },
+  expiresAt.setDate(
+    expiresAt.getDate() +
+      INVITATION_EXPIRY_DAYS,
+  );
 
-          role: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              isSystem: true,
-            },
-          },
-        },
-
-        orderBy: [
-          {
-            status: "asc",
-          },
-          {
-            createdAt: "asc",
-          },
-        ],
-      });
-
-    res.json({
-      success: true,
-      data: members,
-    });
-  } catch (error) {
-    console.error(
-      "GET /api/members error:",
-      error,
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to load workspace members.",
-    });
-  }
-});
+  return expiresAt;
+}
 
 /*
 |--------------------------------------------------------------------------
-| UPDATE MEMBER ROLE
+| PUBLIC — VALIDATE INVITATION TOKEN
 |--------------------------------------------------------------------------
+|
+| This route intentionally appears before router.use(requireAuth).
+| A newly invited user does not have a session yet.
+|
 */
 
-router.patch("/:id/role", async (req, res) => {
-  try {
-    const actorUserId = getUserId(
-      req as unknown as AuthenticatedRequest,
-    );
+router.get(
+  "/invitations/token/:token",
+  async (req, res) => {
+    try {
+      const token = req.params.token?.trim();
 
-    const actorMember =
-      await getWorkspaceMember(
-        actorUserId,
-      );
+      if (!token) {
+        res.status(400).json({
+          success: false,
+          message: "Invitation token is required.",
+        });
 
-    if (!actorMember) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not belong to an active workspace.",
-      });
+        return;
+      }
 
-      return;
-    }
+      const tokenHash =
+        hashInvitationToken(token);
 
-    const actorPermissions =
-      await getEffectivePermissionKeys(
-        actorMember.id,
-        actorMember.roleId,
-      );
+      const invitation =
+        await prisma.workspaceInvitation.findUnique({
+          where: {
+            tokenHash,
+          },
 
-    if (
-      !hasPermission(
-        actorPermissions,
-        "members.update",
-      )
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not have permission to update members.",
-      });
+          include: {
+            workspace: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                description: true,
+              },
+            },
 
-      return;
-    }
+            role: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                isSystem: true,
+              },
+            },
 
-    const memberId =
-      Number(req.params.id);
-
-    if (
-      !Number.isInteger(memberId) ||
-      memberId <= 0
-    ) {
-      res.status(400).json({
-        success: false,
-        message: "Invalid member ID.",
-      });
-
-      return;
-    }
-
-    const targetMember =
-      await prisma.workspaceMember.findFirst({
-        where: {
-          id: memberId,
-          workspaceId:
-            actorMember.workspaceId,
-        },
-
-        include: {
-          user: true,
-          role: true,
-        },
-      });
-
-    if (!targetMember) {
-      res.status(404).json({
-        success: false,
-        message: "Member not found.",
-      });
-
-      return;
-    }
-
-    const roleId =
-      Number(req.body?.roleId);
-
-    if (
-      !Number.isInteger(roleId) ||
-      roleId <= 0
-    ) {
-      res.status(400).json({
-        success: false,
-        message:
-          "A valid roleId is required.",
-      });
-
-      return;
-    }
-
-    const targetRole =
-      await prisma.role.findFirst({
-        where: {
-          id: roleId,
-          workspaceId:
-            actorMember.workspaceId,
-        },
-
-        include: {
-          rolePermissions: {
-            include: {
-              permission: true,
+            invitedBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
             },
           },
-        },
-      });
+        });
 
-    if (!targetRole) {
-      res.status(404).json({
-        success: false,
-        message: "Role not found.",
-      });
+      if (!invitation) {
+        res.status(404).json({
+          success: false,
+          message: "Invalid invitation.",
+        });
 
-      return;
-    }
+        return;
+      }
 
-    const workspace =
-      await prisma.workspace.findUnique({
-        where: {
-          id: actorMember.workspaceId,
-        },
-      });
+      if (invitation.status !== "Pending") {
+        res.status(409).json({
+          success: false,
+          message:
+            invitation.status === "Accepted"
+              ? "This invitation has already been accepted."
+              : invitation.status === "Revoked"
+                ? "This invitation has been cancelled."
+                : "This invitation has expired.",
+        });
 
-    if (!workspace) {
-      res.status(404).json({
-        success: false,
-        message: "Workspace not found.",
-      });
+        return;
+      }
 
-      return;
-    }
+      if (invitation.expiresAt <= new Date()) {
+        await prisma.workspaceInvitation.update({
+          where: {
+            id: invitation.id,
+          },
 
-    if (
-      targetMember.userId ===
-      workspace.ownerId
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "The workspace owner's role cannot be changed.",
-      });
+          data: {
+            status: "Expired",
+          },
+        });
 
-      return;
-    }
+        res.status(410).json({
+          success: false,
+          message: "This invitation has expired.",
+        });
 
-    if (
-      targetRole.name === "Admin" &&
-      actorMember.userId !==
-        workspace.ownerId
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "Only the workspace owner can assign the Admin role.",
-      });
+        return;
+      }
 
-      return;
-    }
-
-    const allowed =
-      await canAssignRole(
-        actorMember.id,
-        actorMember.roleId,
-        targetRole.id,
-      );
-
-    if (!allowed) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You cannot assign a role containing permissions you do not have.",
-      });
-
-      return;
-    }
-
-    const previousRole =
-      targetMember.role.name;
-
-    const updatedMember =
-      await prisma.workspaceMember.update({
-        where: {
-          id: targetMember.id,
-        },
+      res.json({
+        success: true,
 
         data: {
-          roleId: targetRole.id,
-        },
+          id: invitation.id,
 
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
+          email: invitation.email,
 
-          role: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              isSystem: true,
-            },
-          },
+          expiresAt: invitation.expiresAt,
+
+          workspace: invitation.workspace,
+
+          role: invitation.role,
+
+          invitedBy: invitation.invitedBy,
         },
       });
+    } catch (error) {
+      console.error(
+        "GET /api/members/invitations/token/:token error:",
+        error,
+      );
 
-    await prisma.auditLog.create({
-      data: {
-        workspaceId:
-          actorMember.workspaceId,
-
-        actorId: actorUserId,
-
-        memberId:
-          targetMember.id,
-
-        action:
-          targetRole.name === "Admin"
-            ? "Promoted"
-            : previousRole === "Admin"
-              ? "Demoted"
-              : "Updated",
-
-        entityType:
-          "WorkspaceMember",
-
-        entityId:
-          String(targetMember.id),
-
-        description:
-          `Changed ${targetMember.user.email}'s role from ${previousRole} to ${targetRole.name}.`,
-
-        metadata: {
-          previousRole,
-          newRole:
-            targetRole.name,
-          previousRoleId:
-            targetMember.roleId,
-          newRoleId:
-            targetRole.id,
-        },
-      },
-    });
-
-    res.json({
-      success: true,
-      data: updatedMember,
-    });
-  } catch (error) {
-    console.error(
-      "PATCH /api/members/:id/role error:",
-      error,
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to update member role.",
-    });
-  }
-});
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to validate invitation.",
+      });
+    }
+  },
+);
 
 /*
 |--------------------------------------------------------------------------
-| UPDATE MEMBER STATUS
+| PUBLIC — ACCEPT INVITATION
+|--------------------------------------------------------------------------
+|
+| This route is intentionally public.
+| It creates the account, workspace membership and session.
+|
+*/
+
+router.post(
+  "/invitations/token/:token/accept",
+  async (req, res) => {
+    try {
+      const token = req.params.token?.trim();
+
+      if (!token) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Invitation token is required.",
+        });
+
+        return;
+      }
+
+      const tokenHash =
+        hashInvitationToken(token);
+
+      const invitation =
+        await prisma.workspaceInvitation.findUnique({
+          where: {
+            tokenHash,
+          },
+
+          include: {
+            workspace: true,
+
+            role: {
+              include: {
+                rolePermissions: {
+                  include: {
+                    permission: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+      if (!invitation) {
+        res.status(404).json({
+          success: false,
+          message: "Invalid invitation.",
+        });
+
+        return;
+      }
+
+      if (invitation.status !== "Pending") {
+        res.status(409).json({
+          success: false,
+          message:
+            invitation.status === "Accepted"
+              ? "This invitation has already been accepted."
+              : invitation.status === "Revoked"
+                ? "This invitation has been cancelled."
+                : "This invitation has expired.",
+        });
+
+        return;
+      }
+
+      if (invitation.expiresAt <= new Date()) {
+        await prisma.workspaceInvitation.update({
+          where: {
+            id: invitation.id,
+          },
+
+          data: {
+            status: "Expired",
+          },
+        });
+
+        res.status(410).json({
+          success: false,
+          message:
+            "This invitation has expired.",
+        });
+
+        return;
+      }
+
+      const name =
+        typeof req.body?.name === "string"
+          ? req.body.name.trim()
+          : "";
+
+      const password =
+        typeof req.body?.password === "string"
+          ? req.body.password
+          : "";
+
+      if (!name) {
+        res.status(400).json({
+          success: false,
+          message: "Name is required.",
+        });
+
+        return;
+      }
+
+      if (name.length < 2) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Name must contain at least 2 characters.",
+        });
+
+        return;
+      }
+
+      if (name.length > 100) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Name must be 100 characters or less.",
+        });
+
+        return;
+      }
+
+      if (password.length < 8) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Password must contain at least 8 characters.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | CHECK EXISTING USER
+      |--------------------------------------------------------------------------
+      */
+
+      const existingUser =
+        await prisma.user.findUnique({
+          where: {
+            email:
+              invitation.email,
+          },
+        });
+
+      /*
+      |--------------------------------------------------------------------------
+      | EXISTING ACCOUNT CANNOT USE THIS
+      | ENDPOINT WITH A NEW PASSWORD
+      |--------------------------------------------------------------------------
+      */
+
+      if (existingUser) {
+        res.status(409).json({
+          success: false,
+          code: "ACCOUNT_EXISTS",
+          message:
+            "An account already exists with this email. Please sign in to accept the invitation.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | HASH PASSWORD
+      |--------------------------------------------------------------------------
+      */
+
+      const bcrypt =
+        await import("bcryptjs");
+
+      const passwordHash =
+        await bcrypt.hash(
+          password,
+          12,
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | ACCEPT INVITATION TRANSACTIONALLY
+      |--------------------------------------------------------------------------
+      */
+
+      const result =
+        await prisma.$transaction(
+          async (tx) => {
+            /*
+            |--------------------------------------------------------------------------
+            | CREATE USER
+            |--------------------------------------------------------------------------
+            */
+
+            const user =
+              await tx.user.create({
+                data: {
+                  name,
+
+                  email:
+                    invitation.email,
+
+                  password:
+                    passwordHash,
+
+                  firstName:
+                    name.split(" ")[0] ?? "",
+
+                  lastName:
+                    name
+                      .split(" ")
+                      .slice(1)
+                      .join(" "),
+
+                  role:
+                    invitation.role.name,
+                },
+              });
+
+            /*
+            |--------------------------------------------------------------------------
+            | CREATE SETTINGS
+            |--------------------------------------------------------------------------
+            */
+
+            await tx.settings.create({
+              data: {
+                userId:
+                  user.id,
+              },
+            });
+
+            /*
+            |--------------------------------------------------------------------------
+            | CREATE WORKSPACE MEMBERSHIP
+            |--------------------------------------------------------------------------
+            */
+
+            const workspaceMember =
+              await tx.workspaceMember.create({
+                data: {
+                  workspaceId:
+                    invitation.workspaceId,
+
+                  userId:
+                    user.id,
+
+                  roleId:
+                    invitation.roleId,
+
+                  status:
+                    "Active",
+                },
+
+                include: {
+                  role: true,
+                },
+              });
+
+            /*
+            |--------------------------------------------------------------------------
+            | MARK INVITATION ACCEPTED
+            |--------------------------------------------------------------------------
+            */
+
+            const acceptedInvitation =
+              await tx.workspaceInvitation.update({
+                where: {
+                  id:
+                    invitation.id,
+                },
+
+                data: {
+                  status:
+                    "Accepted",
+
+                  acceptedById:
+                    user.id,
+
+                  acceptedAt:
+                    new Date(),
+                },
+              });
+
+            /*
+            |--------------------------------------------------------------------------
+            | AUDIT LOG
+            |--------------------------------------------------------------------------
+            */
+
+            await tx.auditLog.create({
+              data: {
+                workspaceId:
+                  invitation.workspaceId,
+
+                actorId:
+                  user.id,
+
+                memberId:
+                  workspaceMember.id,
+
+                action:
+                  "Updated",
+
+                entityType:
+                  "WorkspaceInvitation",
+
+                entityId:
+                  String(
+                    invitation.id,
+                  ),
+
+                description:
+                  `${user.email} accepted the workspace invitation.`,
+
+                metadata: {
+                  invitationId:
+                    invitation.id,
+
+                  email:
+                    user.email,
+
+                  roleId:
+                    invitation.roleId,
+
+                  roleName:
+                    invitation.role.name,
+                },
+              },
+            });
+
+            return {
+              user,
+
+              workspaceMember,
+
+              acceptedInvitation,
+            };
+          },
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE SESSION
+      |--------------------------------------------------------------------------
+      */
+
+      const {
+        createSession,
+        getSessionCookieName,
+        getSessionCookieOptions,
+      } = await import(
+        "../lib/auth.js"
+      );
+
+      const session =
+        await createSession(
+          result.user.id,
+        );
+
+      res.cookie(
+        getSessionCookieName(),
+        session.id,
+        getSessionCookieOptions(),
+      );
+
+      /*
+      |--------------------------------------------------------------------------
+      | BUILD AUTHORIZATION RESPONSE
+      |--------------------------------------------------------------------------
+      */
+
+      const effectivePermissions =
+        await getEffectivePermissionKeys(
+          result.workspaceMember.id,
+          result.workspaceMember.roleId,
+        );
+
+      res.status(201).json({
+        success: true,
+
+        message:
+          "Invitation accepted successfully.",
+
+        data: {
+          user: {
+            id:
+              result.user.id,
+
+            name:
+              result.user.name,
+
+            email:
+              result.user.email,
+
+            firstName:
+              result.user.firstName,
+
+            lastName:
+              result.user.lastName,
+
+            role:
+              result.user.role,
+          },
+
+          workspace: {
+            id:
+              invitation.workspace.id,
+
+            name:
+              invitation.workspace.name,
+
+            slug:
+              invitation.workspace.slug,
+          },
+
+          membership: {
+            id:
+              result.workspaceMember.id,
+
+            roleId:
+              result.workspaceMember.roleId,
+
+            roleName:
+              result.workspaceMember.role.name,
+
+            status:
+              result.workspaceMember.status,
+          },
+
+          authorization: {
+            workspaceId:
+              invitation.workspaceId,
+
+            workspaceName:
+              invitation.workspace.name,
+
+            memberId:
+              result.workspaceMember.id,
+
+            roleId:
+              result.workspaceMember.roleId,
+
+            roleName:
+              result.workspaceMember.role.name,
+
+            status:
+              result.workspaceMember.status,
+
+            permissions:
+              [
+                ...effectivePermissions,
+              ].sort(),
+          },
+        },
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/members/invitations/token/:token/accept error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to accept workspace invitation.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| ALL ROUTES BELOW THIS POINT REQUIRE AUTHENTICATION
 |--------------------------------------------------------------------------
 */
 
-router.patch("/:id/status", async (req, res) => {
-  try {
-    const actorUserId = getUserId(
-      req as unknown as AuthenticatedRequest,
-    );
-
-    const actorMember =
-      await getWorkspaceMember(
-        actorUserId,
-      );
-
-    if (!actorMember) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not belong to an active workspace.",
-      });
-
-      return;
-    }
-
-    const actorPermissions =
-      await getEffectivePermissionKeys(
-        actorMember.id,
-        actorMember.roleId,
-      );
-
-    if (
-      !hasPermission(
-        actorPermissions,
-        "members.suspend",
-      )
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not have permission to suspend members.",
-      });
-
-      return;
-    }
-
-    const memberId =
-      Number(req.params.id);
-
-    if (
-      !Number.isInteger(memberId) ||
-      memberId <= 0
-    ) {
-      res.status(400).json({
-        success: false,
-        message: "Invalid member ID.",
-      });
-
-      return;
-    }
-
-    const status =
-      req.body?.status;
-
-    if (
-      status !== "Active" &&
-      status !== "Suspended"
-    ) {
-      res.status(400).json({
-        success: false,
-        message:
-          'Status must be either "Active" or "Suspended".',
-      });
-
-      return;
-    }
-
-    const targetMember =
-      await prisma.workspaceMember.findFirst({
-        where: {
-          id: memberId,
-          workspaceId:
-            actorMember.workspaceId,
-        },
-
-        include: {
-          user: true,
-          role: true,
-        },
-      });
-
-    if (!targetMember) {
-      res.status(404).json({
-        success: false,
-        message: "Member not found.",
-      });
-
-      return;
-    }
-
-    const workspace =
-      await prisma.workspace.findUnique({
-        where: {
-          id: actorMember.workspaceId,
-        },
-      });
-
-    if (!workspace) {
-      res.status(404).json({
-        success: false,
-        message: "Workspace not found.",
-      });
-
-      return;
-    }
-
-    if (
-      targetMember.userId ===
-      workspace.ownerId
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "The workspace owner cannot be suspended.",
-      });
-
-      return;
-    }
-
-    if (
-      targetMember.role.name === "Admin" &&
-      actorMember.userId !==
-        workspace.ownerId
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "Only the workspace owner can change an Admin's status.",
-      });
-
-      return;
-    }
-
-    const previousStatus =
-      targetMember.status;
-
-    const updatedMember =
-      await prisma.workspaceMember.update({
-        where: {
-          id: targetMember.id,
-        },
-
-        data: {
-          status,
-        },
-
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-
-          role: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              isSystem: true,
-            },
-          },
-        },
-      });
-
-    await prisma.auditLog.create({
-      data: {
-        workspaceId:
-          actorMember.workspaceId,
-
-        actorId:
-          actorUserId,
-
-        memberId:
-          targetMember.id,
-
-        action:
-          status === "Suspended"
-            ? "Suspended"
-            : "Restored",
-
-        entityType:
-          "WorkspaceMember",
-
-        entityId:
-          String(targetMember.id),
-
-        description:
-          `Changed ${targetMember.user.email}'s status from ${previousStatus} to ${status}.`,
-
-        metadata: {
-          previousStatus,
-          newStatus: status,
-        },
-      },
-    });
-
-    res.json({
-      success: true,
-      data: updatedMember,
-    });
-  } catch (error) {
-    console.error(
-      "PATCH /api/members/:id/status error:",
-      error,
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to update member status.",
-    });
-  }
-});
+router.use(requireAuth);
 
 /*
 |--------------------------------------------------------------------------
-| UPDATE MEMBER PERMISSION OVERRIDE
+| CREATE INVITATION
 |--------------------------------------------------------------------------
 */
 
 router.post(
-  "/:id/permissions",
+  "/invitations",
+  async (req, res) => {
+    try {
+      const actorUserId = getUserId(
+        req as unknown as AuthenticatedRequest,
+      );
+
+      const actorMember =
+        await getWorkspaceMember(
+          actorUserId,
+        );
+
+      if (!actorMember) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not belong to an active workspace.",
+        });
+
+        return;
+      }
+
+      const actorPermissions =
+        await getEffectivePermissionKeys(
+          actorMember.id,
+          actorMember.roleId,
+        );
+
+      if (
+        !hasPermission(
+          actorPermissions,
+          "members.invite",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to invite members.",
+        });
+
+        return;
+      }
+
+      const email =
+        normalizeInvitationEmail(
+          req.body?.email,
+        );
+
+      const roleId = Number(
+        req.body?.roleId,
+      );
+
+      if (
+        !email ||
+        !isValidInvitationEmail(email)
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "A valid email address is required.",
+        });
+
+        return;
+      }
+
+      if (
+        !Number.isInteger(roleId) ||
+        roleId <= 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "A valid roleId is required.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | VERIFY ROLE BELONGS TO CURRENT WORKSPACE
+      |--------------------------------------------------------------------------
+      */
+
+      const targetRole =
+        await prisma.role.findFirst({
+          where: {
+            id: roleId,
+            workspaceId:
+              actorMember.workspaceId,
+          },
+
+          include: {
+            rolePermissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        });
+
+      if (!targetRole) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Role not found in this workspace.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | ACTOR CANNOT INVITE WITH PERMISSIONS
+      | THEY THEMSELVES DO NOT HAVE
+      |--------------------------------------------------------------------------
+      */
+
+      const allowed =
+        await canAssignRole(
+          actorMember.id,
+          actorMember.roleId,
+          targetRole.id,
+        );
+
+      if (!allowed) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You cannot invite a member with a role containing permissions you do not have.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | VERIFY WORKSPACE
+      |--------------------------------------------------------------------------
+      */
+
+      const workspace =
+        await prisma.workspace.findUnique({
+          where: {
+            id: actorMember.workspaceId,
+          },
+
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            ownerId: true,
+          },
+        });
+
+      if (!workspace) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Workspace not found.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | PREVENT INVITING EXISTING MEMBER
+      |--------------------------------------------------------------------------
+      */
+
+      const existingUser =
+        await prisma.user.findUnique({
+          where: {
+            email,
+          },
+
+          select: {
+            id: true,
+            email: true,
+          },
+        });
+
+      if (existingUser) {
+        const existingMembership =
+          await prisma.workspaceMember.findUnique({
+            where: {
+              workspaceId_userId: {
+                workspaceId:
+                  actorMember.workspaceId,
+
+                userId:
+                  existingUser.id,
+              },
+            },
+          });
+
+        if (existingMembership) {
+          res.status(409).json({
+            success: false,
+            message:
+              "This user is already a member of this workspace.",
+          });
+
+          return;
+        }
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | CHECK EXISTING PENDING INVITATION
+      |--------------------------------------------------------------------------
+      */
+
+      const now = new Date();
+
+      const pendingInvitation =
+        await prisma.workspaceInvitation.findFirst({
+          where: {
+            workspaceId:
+              actorMember.workspaceId,
+
+            email,
+
+            status: "Pending",
+          },
+
+          orderBy: {
+            createdAt: "desc",
+          },
+        });
+
+      if (
+        pendingInvitation &&
+        pendingInvitation.expiresAt > now
+      ) {
+        res.status(409).json({
+          success: false,
+          message:
+            "A pending invitation already exists for this email address.",
+        });
+
+        return;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | MARK OLD INVITATION EXPIRED
+      |--------------------------------------------------------------------------
+      */
+
+      if (pendingInvitation) {
+        await prisma.workspaceInvitation.update({
+          where: {
+            id:
+              pendingInvitation.id,
+          },
+
+          data: {
+            status:
+              "Expired",
+          },
+        });
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE SECURE TOKEN
+      |--------------------------------------------------------------------------
+      */
+
+      const rawToken =
+        createInvitationToken();
+
+      const tokenHash =
+        hashInvitationToken(
+          rawToken,
+        );
+
+      const expiresAt =
+        getInvitationExpiryDate();
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE INVITATION + AUDIT LOG
+      |--------------------------------------------------------------------------
+      */
+
+      const invitation =
+        await prisma.$transaction(
+          async (tx) => {
+            const createdInvitation =
+              await tx.workspaceInvitation.create({
+                data: {
+                  workspaceId:
+                    actorMember.workspaceId,
+
+                  email,
+
+                  roleId:
+                    targetRole.id,
+
+                  tokenHash,
+
+                  status:
+                    "Pending",
+
+                  expiresAt,
+
+                  invitedById:
+                    actorUserId,
+                },
+
+                include: {
+                  role: {
+                    select: {
+                      id: true,
+                      name: true,
+                      description: true,
+                      isSystem: true,
+                    },
+                  },
+
+                  workspace: {
+                    select: {
+                      id: true,
+                      name: true,
+                      slug: true,
+                    },
+                  },
+
+                  invitedBy: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true,
+                    },
+                  },
+                },
+              });
+
+            await tx.auditLog.create({
+              data: {
+                workspaceId:
+                  actorMember.workspaceId,
+
+                actorId:
+                  actorUserId,
+
+                action:
+                  "Invited",
+
+                entityType:
+                  "WorkspaceInvitation",
+
+                entityId:
+                  String(
+                    createdInvitation.id,
+                  ),
+
+                description:
+                  `Invited ${email} to join the workspace as ${targetRole.name}.`,
+
+                metadata: {
+                  invitationId:
+                    createdInvitation.id,
+
+                  email,
+
+                  roleId:
+                    targetRole.id,
+
+                  roleName:
+                    targetRole.name,
+
+                  expiresAt:
+                    expiresAt.toISOString(),
+                },
+              },
+            });
+
+            return createdInvitation;
+          },
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE FRONTEND INVITATION URL
+      |--------------------------------------------------------------------------
+      */
+
+      const frontendUrl = (
+        process.env.FRONTEND_URL ||
+        "http://localhost:3000"
+      ).replace(
+        /\/$/,
+        "",
+      );
+
+      const invitationUrl =
+        `${frontendUrl}/invite/${rawToken}`;
+
+      /*
+      |--------------------------------------------------------------------------
+      | RETURN INVITATION
+      |--------------------------------------------------------------------------
+      */
+
+      res.status(201).json({
+        success: true,
+
+        message:
+          "Workspace invitation created successfully.",
+
+        data: {
+          id:
+            invitation.id,
+
+          email:
+            invitation.email,
+
+          status:
+            invitation.status,
+
+          expiresAt:
+            invitation.expiresAt,
+
+          role:
+            invitation.role,
+
+          workspace:
+            invitation.workspace,
+
+          invitedBy:
+            invitation.invitedBy,
+
+          invitationUrl,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/members/invitations error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to create workspace invitation.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET INVITATIONS
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/invitations",
+  async (req, res) => {
+    try {
+      const member =
+        await requireCurrentMember(
+          req,
+          res,
+        );
+
+      if (!member) {
+        return;
+      }
+
+      const permissions =
+        await getEffectivePermissionKeys(
+          member.id,
+          member.roleId,
+        );
+
+      if (
+        !hasPermission(
+          permissions,
+          "members.view",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to view workspace invitations.",
+        });
+
+        return;
+      }
+
+      await prisma.workspaceInvitation.updateMany({
+        where: {
+          workspaceId:
+            member.workspaceId,
+
+          status:
+            "Pending",
+
+          expiresAt: {
+            lte: new Date(),
+          },
+        },
+
+        data: {
+          status:
+            "Expired",
+        },
+      });
+
+      const invitations =
+        await prisma.workspaceInvitation.findMany({
+          where: {
+            workspaceId:
+              member.workspaceId,
+          },
+
+          include: {
+            role: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                isSystem: true,
+              },
+            },
+
+            invitedBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+
+            acceptedBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+
+          orderBy: {
+            createdAt: "desc",
+          },
+        });
+
+      /*
+      |--------------------------------------------------------------------------
+      | NEVER RETURN TOKEN HASH
+      |--------------------------------------------------------------------------
+      */
+
+      const safeInvitations =
+        invitations.map(
+          (invitation) => ({
+            id:
+              invitation.id,
+
+            email:
+              invitation.email,
+
+            status:
+              invitation.status,
+
+            expiresAt:
+              invitation.expiresAt,
+
+            acceptedAt:
+              invitation.acceptedAt,
+
+            revokedAt:
+              invitation.revokedAt,
+
+            createdAt:
+              invitation.createdAt,
+
+            updatedAt:
+              invitation.updatedAt,
+
+            role:
+              invitation.role,
+
+            invitedBy:
+              invitation.invitedBy,
+
+            acceptedBy:
+              invitation.acceptedBy,
+          }),
+        );
+
+      res.json({
+        success: true,
+        data:
+          safeInvitations,
+      });
+    } catch (error) {
+      console.error(
+        "GET /api/members/invitations error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load workspace invitations.",
+      });
+    }
+  },
+);
+/*
+|--------------------------------------------------------------------------
+| CANCEL INVITATION
+|--------------------------------------------------------------------------
+*/
+
+router.delete(
+  "/invitations/:id",
   async (req, res) => {
     try {
       const actorUserId =
@@ -869,14 +1558,354 @@ router.post(
           actorMember.roleId,
         );
 
-      const targetMemberId =
+      if (
+        !hasPermission(
+          actorPermissions,
+          "members.invite",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to manage workspace invitations.",
+        });
+
+        return;
+      }
+
+      const invitationId =
         Number(req.params.id);
 
       if (
         !Number.isInteger(
-          targetMemberId,
+          invitationId,
         ) ||
-        targetMemberId <= 0
+        invitationId <= 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Invalid invitation ID.",
+        });
+
+        return;
+      }
+
+      const invitation =
+        await prisma.workspaceInvitation.findFirst({
+          where: {
+            id:
+              invitationId,
+
+            workspaceId:
+              actorMember.workspaceId,
+          },
+
+          include: {
+            role: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        });
+
+      if (!invitation) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Invitation not found.",
+        });
+
+        return;
+      }
+
+      if (
+        invitation.status !==
+        "Pending"
+      ) {
+        res.status(409).json({
+          success: false,
+          message:
+            "Only pending invitations can be cancelled.",
+        });
+
+        return;
+      }
+
+      const revoked =
+        await prisma.$transaction(
+          async (tx) => {
+            const updated =
+              await tx.workspaceInvitation.update({
+                where: {
+                  id:
+                    invitation.id,
+                },
+
+                data: {
+                  status:
+                    "Revoked",
+
+                  revokedAt:
+                    new Date(),
+                },
+
+                include: {
+                  role: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              });
+
+            await tx.auditLog.create({
+              data: {
+                workspaceId:
+                  actorMember.workspaceId,
+
+                actorId:
+                  actorUserId,
+
+                action:
+                  "Updated",
+
+                entityType:
+                  "WorkspaceInvitation",
+
+                entityId:
+                  String(
+                    invitation.id,
+                  ),
+
+                description:
+                  `Cancelled invitation for ${invitation.email}.`,
+
+                metadata: {
+                  invitationId:
+                    invitation.id,
+
+                  email:
+                    invitation.email,
+
+                  roleId:
+                    invitation.role.id,
+
+                  roleName:
+                    invitation.role.name,
+
+                  previousStatus:
+                    invitation.status,
+
+                  newStatus:
+                    "Revoked",
+                },
+              },
+            });
+
+            return updated;
+          },
+        );
+
+      res.json({
+        success: true,
+
+        message:
+          "Workspace invitation cancelled successfully.",
+
+        data: {
+          id:
+            revoked.id,
+
+          email:
+            invitation.email,
+
+          status:
+            revoked.status,
+
+          revokedAt:
+            revoked.revokedAt,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "DELETE /api/members/invitations/:id error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to cancel workspace invitation.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| GET MEMBERS
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/",
+  async (req, res) => {
+    try {
+      const member =
+        await requireCurrentMember(
+          req,
+          res,
+        );
+
+      if (!member) {
+        return;
+      }
+
+      const permissions =
+        await getEffectivePermissionKeys(
+          member.id,
+          member.roleId,
+        );
+
+      if (
+        !hasPermission(
+          permissions,
+          "members.view",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to view members.",
+        });
+
+        return;
+      }
+
+      const members =
+        await prisma.workspaceMember.findMany({
+          where: {
+            workspaceId:
+              member.workspaceId,
+          },
+
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+                bio: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
+
+            role: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                isSystem: true,
+              },
+            },
+          },
+
+          orderBy: [
+            {
+              status: "asc",
+            },
+
+            {
+              createdAt: "asc",
+            },
+          ],
+        });
+
+      res.json({
+        success: true,
+        data:
+          members,
+      });
+    } catch (error) {
+      console.error(
+        "GET /api/members error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load workspace members.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| UPDATE MEMBER ROLE
+|--------------------------------------------------------------------------
+*/
+
+router.patch(
+  "/:id/role",
+  async (req, res) => {
+    try {
+      const actorUserId =
+        getUserId(
+          req as unknown as AuthenticatedRequest,
+        );
+
+      const actorMember =
+        await getWorkspaceMember(
+          actorUserId,
+        );
+
+      if (!actorMember) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not belong to an active workspace.",
+        });
+
+        return;
+      }
+
+      const actorPermissions =
+        await getEffectivePermissionKeys(
+          actorMember.id,
+          actorMember.roleId,
+        );
+
+      if (
+        !hasPermission(
+          actorPermissions,
+          "members.update",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to update members.",
+        });
+
+        return;
+      }
+
+      const memberId =
+        Number(req.params.id);
+
+      if (
+        !Number.isInteger(memberId) ||
+        memberId <= 0
       ) {
         res.status(400).json({
           success: false,
@@ -890,13 +1919,16 @@ router.post(
       const targetMember =
         await prisma.workspaceMember.findFirst({
           where: {
-            id: targetMemberId,
+            id:
+              memberId,
+
             workspaceId:
               actorMember.workspaceId,
           },
 
           include: {
             user: true,
+            role: true,
           },
         });
 
@@ -910,10 +1942,56 @@ router.post(
         return;
       }
 
+      const roleId =
+        Number(req.body?.roleId);
+
+      if (
+        !Number.isInteger(roleId) ||
+        roleId <= 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "A valid roleId is required.",
+        });
+
+        return;
+      }
+
+      const targetRole =
+        await prisma.role.findFirst({
+          where: {
+            id:
+              roleId,
+
+            workspaceId:
+              actorMember.workspaceId,
+          },
+
+          include: {
+            rolePermissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        });
+
+      if (!targetRole) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Role not found.",
+        });
+
+        return;
+      }
+
       const workspace =
         await prisma.workspace.findUnique({
           where: {
-            id: actorMember.workspaceId,
+            id:
+              actorMember.workspaceId,
           },
         });
 
@@ -934,131 +2012,77 @@ router.post(
         res.status(403).json({
           success: false,
           message:
-            "The workspace owner cannot have permission overrides.",
+            "The workspace owner's role cannot be changed.",
         });
 
         return;
       }
 
-      const permissionId =
-        Number(
-          req.body?.permissionId,
+      if (
+        targetRole.name === "Admin" &&
+        actorMember.userId !==
+          workspace.ownerId
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "Only the workspace owner can assign the Admin role.",
+        });
+
+        return;
+      }
+
+      const allowed =
+        await canAssignRole(
+          actorMember.id,
+          actorMember.roleId,
+          targetRole.id,
         );
 
-      const effect =
-        req.body?.effect;
-
-      if (
-        !Number.isInteger(
-          permissionId,
-        ) ||
-        permissionId <= 0
-      ) {
-        res.status(400).json({
-          success: false,
-          message:
-            "A valid permissionId is required.",
-        });
-
-        return;
-      }
-
-      if (
-        effect !== "Allow" &&
-        effect !== "Deny"
-      ) {
-        res.status(400).json({
-          success: false,
-          message:
-            'Effect must be either "Allow" or "Deny".',
-        });
-
-        return;
-      }
-
-      const requiredPermission =
-        effect === "Allow"
-          ? "permissions.grant"
-          : "permissions.revoke";
-
-      if (
-        !actorPermissions.has(
-          requiredPermission,
-        )
-      ) {
+      if (!allowed) {
         res.status(403).json({
           success: false,
           message:
-            effect === "Allow"
-              ? "You do not have permission to grant permissions."
-              : "You do not have permission to revoke permissions.",
+            "You cannot assign a role containing permissions you do not have.",
         });
 
         return;
       }
 
-      const permission =
-        await prisma.permission.findFirst({
+      const previousRole =
+        targetMember.role.name;
+
+      const updatedMember =
+        await prisma.workspaceMember.update({
           where: {
-            id: permissionId,
-            workspaceId:
-              actorMember.workspaceId,
-          },
-        });
-
-      if (!permission) {
-        res.status(404).json({
-          success: false,
-          message:
-            "Permission not found.",
-        });
-
-        return;
-      }
-
-      if (
-        !actorPermissions.has(
-          permission.key,
-        )
-      ) {
-        res.status(403).json({
-          success: false,
-          message:
-            `You do not have permission to override "${permission.key}".`,
-        });
-
-        return;
-      }
-
-      const override =
-        await prisma.memberPermission.upsert({
-          where: {
-            memberId_permissionId: {
-              memberId:
-                targetMember.id,
-              permissionId:
-                permission.id,
-            },
-          },
-
-          create: {
-            memberId:
+            id:
               targetMember.id,
-            permissionId:
-              permission.id,
-            effect,
-            grantedById:
-              actorUserId,
           },
 
-          update: {
-            effect,
-            grantedById:
-              actorUserId,
+          data: {
+            roleId:
+              targetRole.id,
           },
 
           include: {
-            permission: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+
+            role: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                isSystem: true,
+              },
+            },
           },
         });
 
@@ -1074,43 +2098,53 @@ router.post(
             targetMember.id,
 
           action:
-            effect === "Allow"
-              ? "Granted"
-              : "Revoked",
+            targetRole.name === "Admin"
+              ? "Promoted"
+              : previousRole === "Admin"
+                ? "Demoted"
+                : "Updated",
 
           entityType:
-            "MemberPermission",
+            "WorkspaceMember",
 
           entityId:
-            String(override.id),
+            String(
+              targetMember.id,
+            ),
 
           description:
-            `${effect === "Allow" ? "Granted" : "Denied"} ${permission.key} for ${targetMember.user.email}.`,
+            `Changed ${targetMember.user.email}'s role from ${previousRole} to ${targetRole.name}.`,
 
           metadata: {
-            permissionId:
-              permission.id,
-            permissionKey:
-              permission.key,
-            effect,
+            previousRole,
+
+            newRole:
+              targetRole.name,
+
+            previousRoleId:
+              targetMember.roleId,
+
+            newRoleId:
+              targetRole.id,
           },
         },
       });
 
       res.json({
         success: true,
-        data: override,
+        data:
+          updatedMember,
       });
     } catch (error) {
       console.error(
-        "POST /api/members/:id/permissions error:",
+        "PATCH /api/members/:id/role error:",
         error,
       );
 
       res.status(500).json({
         success: false,
         message:
-          "Failed to update member permission.",
+          "Failed to update member role.",
       });
     }
   },
@@ -1118,332 +2152,250 @@ router.post(
 
 /*
 |--------------------------------------------------------------------------
-| GET ROLES
+| UPDATE MEMBER STATUS
 |--------------------------------------------------------------------------
 */
 
-router.get("/roles", async (req, res) => {
-  try {
-    const member =
-      await requireCurrentMember(
-        req,
-        res,
-      );
+router.patch(
+  "/:id/status",
+  async (req, res) => {
+    try {
+      const actorUserId =
+        getUserId(
+          req as unknown as AuthenticatedRequest,
+        );
 
-    if (!member) {
-      return;
-    }
+      const actorMember =
+        await getWorkspaceMember(
+          actorUserId,
+        );
 
-    const permissions =
-      await getEffectivePermissionKeys(
-        member.id,
-        member.roleId,
-      );
+      if (!actorMember) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not belong to an active workspace.",
+        });
 
-    if (
-      !hasPermission(
-        permissions,
-        "roles.view",
-      )
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not have permission to view roles.",
-      });
+        return;
+      }
 
-      return;
-    }
+      const actorPermissions =
+        await getEffectivePermissionKeys(
+          actorMember.id,
+          actorMember.roleId,
+        );
 
-    const roles =
-      await prisma.role.findMany({
-        where: {
+      if (
+        !hasPermission(
+          actorPermissions,
+          "members.suspend",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to suspend members.",
+        });
+
+        return;
+      }
+
+      const memberId =
+        Number(req.params.id);
+
+      if (
+        !Number.isInteger(memberId) ||
+        memberId <= 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Invalid member ID.",
+        });
+
+        return;
+      }
+
+      const status =
+        req.body?.status;
+
+      if (
+        status !== "Active" &&
+        status !== "Suspended"
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            'Status must be either "Active" or "Suspended".',
+        });
+
+        return;
+      }
+
+      const targetMember =
+        await prisma.workspaceMember.findFirst({
+          where: {
+            id:
+              memberId,
+
+            workspaceId:
+              actorMember.workspaceId,
+          },
+
+          include: {
+            user: true,
+            role: true,
+          },
+        });
+
+      if (!targetMember) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Member not found.",
+        });
+
+        return;
+      }
+
+      const workspace =
+        await prisma.workspace.findUnique({
+          where: {
+            id:
+              actorMember.workspaceId,
+          },
+        });
+
+      if (!workspace) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Workspace not found.",
+        });
+
+        return;
+      }
+
+      if (
+        targetMember.userId ===
+        workspace.ownerId
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "The workspace owner cannot be suspended.",
+        });
+
+        return;
+      }
+
+      if (
+        targetMember.role.name ===
+          "Admin" &&
+        actorMember.userId !==
+          workspace.ownerId
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "Only the workspace owner can change an Admin's status.",
+        });
+
+        return;
+      }
+
+      const previousStatus =
+        targetMember.status;
+
+      const updatedMember =
+        await prisma.workspaceMember.update({
+          where: {
+            id:
+              targetMember.id,
+          },
+
+          data: {
+            status,
+          },
+
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+
+            role: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                isSystem: true,
+              },
+            },
+          },
+        });
+
+      await prisma.auditLog.create({
+        data: {
           workspaceId:
-            member.workspaceId,
-        },
+            actorMember.workspaceId,
 
-        include: {
-          rolePermissions: {
-            include: {
-              permission: true,
-            },
+          actorId:
+            actorUserId,
+
+          memberId:
+            targetMember.id,
+
+          action:
+            status === "Suspended"
+              ? "Suspended"
+              : "Restored",
+
+          entityType:
+            "WorkspaceMember",
+
+          entityId:
+            String(
+              targetMember.id,
+            ),
+
+          description:
+            `${targetMember.user.email} was ${status === "Suspended" ? "suspended" : "reactivated"}.`,
+
+          metadata: {
+            previousStatus,
+
+            newStatus:
+              status,
           },
-
-          _count: {
-            select: {
-              members: true,
-            },
-          },
-        },
-
-        orderBy: [
-          {
-            isSystem: "desc",
-          },
-          {
-            name: "asc",
-          },
-        ],
-      });
-
-    res.json({
-      success: true,
-      data: roles,
-    });
-  } catch (error) {
-    console.error(
-      "GET /api/members/roles error:",
-      error,
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to load roles.",
-    });
-  }
-});
-
-/*
-|--------------------------------------------------------------------------
-| CREATE ROLE
-|--------------------------------------------------------------------------
-*/
-
-router.post("/roles", async (req, res) => {
-  try {
-    const member =
-      await requireCurrentMember(
-        req,
-        res,
-      );
-
-    if (!member) {
-      return;
-    }
-
-    const actorPermissions =
-      await getEffectivePermissionKeys(
-        member.id,
-        member.roleId,
-      );
-
-    if (
-      !hasPermission(
-        actorPermissions,
-        "roles.create",
-      )
-    ) {
-      res.status(403).json({
-        success: false,
-        message:
-          "You do not have permission to create roles.",
-      });
-
-      return;
-    }
-
-    const name =
-      typeof req.body?.name ===
-      "string"
-        ? req.body.name.trim()
-        : "";
-
-    const description =
-      typeof req.body?.description ===
-      "string"
-        ? req.body.description.trim()
-        : "";
-
-    if (!name) {
-      res.status(400).json({
-        success: false,
-        message:
-          "Role name is required.",
-      });
-
-      return;
-    }
-
-    if (name.length > 100) {
-      res.status(400).json({
-        success: false,
-        message:
-          "Role name must be 100 characters or less.",
-      });
-
-      return;
-    }
-
-    if (name.length < 2) {
-      res.status(400).json({
-        success: false,
-        message:
-          "Role name must contain at least 2 characters.",
-      });
-
-      return;
-    }
-
-    const existingRole =
-      await prisma.role.findFirst({
-        where: {
-          workspaceId:
-            member.workspaceId,
-          name,
         },
       });
 
-    if (existingRole) {
-      res.status(409).json({
-        success: false,
-        message:
-          "A role with this name already exists.",
+      res.json({
+        success: true,
+        data:
+          updatedMember,
       });
-
-      return;
-    }
-
-    const numericPermissionIds =
-      parsePermissionIds(
-        req.body?.permissionIds,
+    } catch (error) {
+      console.error(
+        "PATCH /api/members/:id/status error:",
+        error,
       );
 
-    if (
-      numericPermissionIds ===
-      null
-    ) {
-      res.status(400).json({
+      res.status(500).json({
         success: false,
         message:
-          "permissionIds must contain valid permission IDs.",
+          "Failed to update member status.",
       });
-
-      return;
     }
-
-    const validation =
-      await validateRolePermissions(
-        member.workspaceId,
-        actorPermissions,
-        numericPermissionIds,
-      );
-
-    if (!validation.valid) {
-      res.status(403).json({
-        success: false,
-        message:
-          validation.message ??
-          "Invalid role permissions.",
-      });
-
-      return;
-    }
-
-    const role =
-      await prisma.$transaction(
-        async (tx) => {
-          const createdRole =
-            await tx.role.create({
-              data: {
-                workspaceId:
-                  member.workspaceId,
-                name,
-                description,
-                isSystem: false,
-                createdById:
-                  member.userId,
-              },
-            });
-
-          if (
-            numericPermissionIds.length >
-            0
-          ) {
-            await tx.rolePermission.createMany(
-              {
-                data: [
-                  ...new Set(
-                    numericPermissionIds,
-                  ),
-                ].map(
-                  (
-                    permissionId,
-                  ) => ({
-                    roleId:
-                      createdRole.id,
-                    permissionId,
-                    effect:
-                      "Allow" as const,
-                  }),
-                ),
-              },
-            );
-          }
-
-          await tx.auditLog.create({
-            data: {
-              workspaceId:
-                member.workspaceId,
-              actorId:
-                member.userId,
-              action:
-                "RoleCreated",
-              entityType:
-                "Role",
-              entityId:
-                String(
-                  createdRole.id,
-                ),
-              description:
-                `Created custom role "${name}".`,
-              metadata: {
-                roleName: name,
-                permissionIds:
-                  numericPermissionIds,
-              },
-            },
-          });
-
-          return tx.role.findUnique({
-            where: {
-              id: createdRole.id,
-            },
-
-            include: {
-              rolePermissions: {
-                include: {
-                  permission: true,
-                },
-              },
-
-              _count: {
-                select: {
-                  members: true,
-                },
-              },
-            },
-          });
-        },
-      );
-
-    res.status(201).json({
-      success: true,
-      data: role,
-    });
-  } catch (error) {
-    console.error(
-      "POST /api/members/roles error:",
-      error,
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to create role.",
-    });
-  }
-});
+  },
+);
 
 /*
 |--------------------------------------------------------------------------
@@ -1490,9 +2442,7 @@ router.patch(
         Number(req.params.id);
 
       if (
-        !Number.isInteger(
-          roleId,
-        ) ||
+        !Number.isInteger(roleId) ||
         roleId <= 0
       ) {
         res.status(400).json({
@@ -1504,20 +2454,26 @@ router.patch(
         return;
       }
 
-      const role =
+      const existingRole =
         await prisma.role.findFirst({
           where: {
-            id: roleId,
+            id:
+              roleId,
+
             workspaceId:
               member.workspaceId,
           },
 
           include: {
-            rolePermissions: true,
+            rolePermissions: {
+              include: {
+                permission: true,
+              },
+            },
           },
         });
 
-      if (!role) {
+      if (!existingRole) {
         res.status(404).json({
           success: false,
           message:
@@ -1527,7 +2483,7 @@ router.patch(
         return;
       }
 
-      if (role.isSystem) {
+      if (existingRole.isSystem) {
         res.status(403).json({
           success: false,
           message:
@@ -1538,28 +2494,25 @@ router.patch(
       }
 
       const name =
-        req.body?.name ===
-        undefined
-          ? role.name
-          : typeof req.body.name ===
-              "string"
-            ? req.body.name.trim()
-            : "";
+        typeof req.body?.name ===
+        "string"
+          ? req.body.name.trim()
+          : existingRole.name;
 
       const description =
-        req.body?.description ===
-        undefined
-          ? role.description
-          : typeof req.body.description ===
-              "string"
-            ? req.body.description.trim()
-            : "";
+        typeof req.body?.description ===
+        "string"
+          ? req.body.description.trim()
+          : existingRole.description;
 
-      if (!name) {
+      if (
+        !name ||
+        name.length < 2
+      ) {
         res.status(400).json({
           success: false,
           message:
-            "Role name is required.",
+            "Role name must contain at least 2 characters.",
         });
 
         return;
@@ -1580,9 +2533,12 @@ router.patch(
           where: {
             workspaceId:
               member.workspaceId,
+
             name,
+
             NOT: {
-              id: role.id,
+              id:
+                existingRole.id,
             },
           },
         });
@@ -1600,9 +2556,9 @@ router.patch(
       const numericPermissionIds =
         req.body?.permissionIds ===
         undefined
-          ? role.rolePermissions.map(
-              (entry) =>
-                entry.permissionId,
+          ? existingRole.rolePermissions.map(
+              (rolePermission) =>
+                rolePermission.permissionId,
             )
           : parsePermissionIds(
               req.body.permissionIds,
@@ -1639,52 +2595,53 @@ router.patch(
         return;
       }
 
-      const uniquePermissionIds = [
-        ...new Set(
-          numericPermissionIds,
-        ),
-      ];
-
       const updatedRole =
         await prisma.$transaction(
           async (tx) => {
-            await tx.role.update({
-              where: {
-                id: role.id,
-              },
+            const role =
+              await tx.role.update({
+                where: {
+                  id:
+                    existingRole.id,
+                },
 
-              data: {
-                name,
-                description,
+                data: {
+                  name,
+
+                  description,
+                },
+              });
+
+            await tx.rolePermission.deleteMany({
+              where: {
+                roleId:
+                  existingRole.id,
               },
             });
 
-            await tx.rolePermission.deleteMany(
-              {
-                where: {
-                  roleId: role.id,
-                },
-              },
-            );
-
             if (
-              uniquePermissionIds.length >
+              numericPermissionIds.length >
               0
             ) {
               await tx.rolePermission.createMany(
                 {
-                  data:
-                    uniquePermissionIds.map(
-                      (
-                        permissionId,
-                      ) => ({
-                        roleId:
-                          role.id,
-                        permissionId,
-                        effect:
-                          "Allow" as const,
-                      }),
+                  data: [
+                    ...new Set(
+                      numericPermissionIds,
                     ),
+                  ].map(
+                    (
+                      permissionId,
+                    ) => ({
+                      roleId:
+                        existingRole.id,
+
+                      permissionId,
+
+                      effect:
+                        "Allow" as const,
+                    }),
+                  ),
                 },
               );
             }
@@ -1693,31 +2650,49 @@ router.patch(
               data: {
                 workspaceId:
                   member.workspaceId,
+
                 actorId:
                   member.userId,
+
                 action:
                   "RoleUpdated",
+
                 entityType:
                   "Role",
+
                 entityId:
                   String(
-                    role.id,
+                    existingRole.id,
                   ),
+
                 description:
-                  `Updated custom role "${name}".`,
+                  `Updated custom role "${existingRole.name}".`,
+
                 metadata: {
                   previousName:
-                    role.name,
-                  newName: name,
-                  permissionIds:
-                    uniquePermissionIds,
+                    existingRole.name,
+
+                  newName:
+                    name,
+
+                  previousPermissionIds:
+                    existingRole.rolePermissions.map(
+                      (
+                        rolePermission,
+                      ) =>
+                        rolePermission.permissionId,
+                    ),
+
+                  newPermissionIds:
+                    numericPermissionIds,
                 },
               },
             });
 
-            return tx.role.findUnique({
+            return tx.role.findUniqueOrThrow({
               where: {
-                id: role.id,
+                id:
+                  role.id,
               },
 
               include: {
@@ -1739,7 +2714,8 @@ router.patch(
 
       res.json({
         success: true,
-        data: updatedRole,
+        data:
+          updatedRole,
       });
     } catch (error) {
       console.error(
@@ -1801,9 +2777,7 @@ router.delete(
         Number(req.params.id);
 
       if (
-        !Number.isInteger(
-          roleId,
-        ) ||
+        !Number.isInteger(roleId) ||
         roleId <= 0
       ) {
         res.status(400).json({
@@ -1818,7 +2792,9 @@ router.delete(
       const role =
         await prisma.role.findFirst({
           where: {
-            id: roleId,
+            id:
+              roleId,
+
             workspaceId:
               member.workspaceId,
           },
@@ -1856,7 +2832,7 @@ router.delete(
         res.status(409).json({
           success: false,
           message:
-            "This role cannot be deleted while members are assigned to it.",
+            "This role is assigned to members and cannot be deleted until those members are reassigned.",
         });
 
         return;
@@ -1866,7 +2842,8 @@ router.delete(
         async (tx) => {
           await tx.role.delete({
             where: {
-              id: role.id,
+              id:
+                role.id,
             },
           });
 
@@ -1874,16 +2851,24 @@ router.delete(
             data: {
               workspaceId:
                 member.workspaceId,
+
               actorId:
                 member.userId,
+
               action:
                 "RoleDeleted",
+
               entityType:
                 "Role",
+
               entityId:
-                String(role.id),
+                String(
+                  role.id,
+                ),
+
               description:
                 `Deleted custom role "${role.name}".`,
+
               metadata: {
                 roleName:
                   role.name,
@@ -1933,7 +2918,7 @@ router.get(
         return;
       }
 
-      const actorPermissions =
+      const permissions =
         await getEffectivePermissionKeys(
           member.id,
           member.roleId,
@@ -1941,7 +2926,7 @@ router.get(
 
       if (
         !hasPermission(
-          actorPermissions,
+          permissions,
           "permissions.view",
         )
       ) {
@@ -1954,26 +2939,23 @@ router.get(
         return;
       }
 
-      const permissions =
+      const permissionRecords =
         await prisma.permission.findMany({
           where: {
             workspaceId:
               member.workspaceId,
           },
 
-          orderBy: [
-            {
-              category: "asc",
-            },
-            {
-              name: "asc",
-            },
-          ],
+          orderBy: {
+            key:
+              "asc",
+          },
         });
 
       res.json({
         success: true,
-        data: permissions,
+        data:
+          permissionRecords,
       });
     } catch (error) {
       console.error(
@@ -1990,6 +2972,331 @@ router.get(
   },
 );
 
+/*
+|--------------------------------------------------------------------------
+| GET MEMBER PERMISSION OVERRIDES
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:id/permissions",
+  async (req, res) => {
+    try {
+      const member =
+        await requireCurrentMember(
+          req,
+          res,
+        );
+
+      if (!member) {
+        return;
+      }
+
+      const permissions =
+        await getEffectivePermissionKeys(
+          member.id,
+          member.roleId,
+        );
+
+      if (
+        !hasPermission(
+          permissions,
+          "permissions.view",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to view member permissions.",
+        });
+
+        return;
+      }
+
+      const targetMemberId =
+        Number(req.params.id);
+
+      if (
+        !Number.isInteger(
+          targetMemberId,
+        ) ||
+        targetMemberId <= 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Invalid member ID.",
+        });
+
+        return;
+      }
+
+      const targetMember =
+        await prisma.workspaceMember.findFirst({
+          where: {
+            id:
+              targetMemberId,
+
+            workspaceId:
+              member.workspaceId,
+          },
+
+          include: {
+            permissionOverrides: {
+              include: {
+                permission: true,
+                grantedBy: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+      if (!targetMember) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Member not found.",
+        });
+
+        return;
+      }
+
+      res.json({
+        success: true,
+        data:
+          targetMember.permissionOverrides,
+      });
+    } catch (error) {
+      console.error(
+        "GET /api/members/:id/permissions error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load member permission overrides.",
+      });
+    }
+  },
+);
+
+/*
+|--------------------------------------------------------------------------
+| DELETE MEMBER PERMISSION OVERRIDE
+|--------------------------------------------------------------------------
+*/
+
+router.delete(
+  "/:id/permissions/:permissionId",
+  async (req, res) => {
+    try {
+      const actorUserId =
+        getUserId(
+          req as unknown as AuthenticatedRequest,
+        );
+
+      const actorMember =
+        await getWorkspaceMember(
+          actorUserId,
+        );
+
+      if (!actorMember) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not belong to an active workspace.",
+        });
+
+        return;
+      }
+
+      const actorPermissions =
+        await getEffectivePermissionKeys(
+          actorMember.id,
+          actorMember.roleId,
+        );
+
+      if (
+        !hasPermission(
+          actorPermissions,
+          "permissions.revoke",
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to revoke permissions.",
+        });
+
+        return;
+      }
+
+      const targetMemberId =
+        Number(req.params.id);
+
+      const permissionId =
+        Number(
+          req.params.permissionId,
+        );
+
+      if (
+        !Number.isInteger(
+          targetMemberId,
+        ) ||
+        targetMemberId <= 0 ||
+        !Number.isInteger(
+          permissionId,
+        ) ||
+        permissionId <= 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            "Invalid member ID or permission ID.",
+        });
+
+        return;
+      }
+
+      const targetMember =
+        await prisma.workspaceMember.findFirst({
+          where: {
+            id:
+              targetMemberId,
+
+            workspaceId:
+              actorMember.workspaceId,
+          },
+
+          include: {
+            user: true,
+          },
+        });
+
+      if (!targetMember) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Member not found.",
+        });
+
+        return;
+      }
+
+      const override =
+        await prisma.memberPermission.findFirst({
+          where: {
+            memberId:
+              targetMember.id,
+
+            permissionId,
+          },
+
+          include: {
+            permission: true,
+          },
+        });
+
+      if (!override) {
+        res.status(404).json({
+          success: false,
+          message:
+            "Permission override not found.",
+        });
+
+        return;
+      }
+
+      if (
+        !actorPermissions.has(
+          override.permission.key,
+        )
+      ) {
+        res.status(403).json({
+          success: false,
+          message:
+            `You do not have permission to override "${override.permission.key}".`,
+        });
+
+        return;
+      }
+
+      await prisma.memberPermission.delete({
+        where: {
+          memberId_permissionId: {
+            memberId:
+              targetMember.id,
+
+            permissionId:
+              override.permissionId,
+          },
+        },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          workspaceId:
+            actorMember.workspaceId,
+
+          actorId:
+            actorUserId,
+
+          memberId:
+            targetMember.id,
+
+          action:
+            "Revoked",
+
+          entityType:
+            "MemberPermission",
+
+          entityId:
+            String(
+              override.id,
+            ),
+
+          description:
+            `Removed permission override "${override.permission.key}" from ${targetMember.user.email}.`,
+
+          metadata: {
+            permissionId:
+              override.permissionId,
+
+            permissionKey:
+              override.permission.key,
+
+            previousEffect:
+              override.effect,
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        message:
+          "Permission override removed successfully.",
+      });
+    } catch (error) {
+      console.error(
+        "DELETE /api/members/:id/permissions/:permissionId error:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to remove member permission override.",
+      });
+    }
+  },
+);
 /*
 |--------------------------------------------------------------------------
 | GET AUDIT LOGS
@@ -2061,7 +3368,8 @@ router.get(
           },
 
           orderBy: {
-            createdAt: "desc",
+            createdAt:
+              "desc",
           },
 
           take: 200,
@@ -2069,7 +3377,8 @@ router.get(
 
       res.json({
         success: true,
-        data: auditLogs,
+        data:
+          auditLogs,
       });
     } catch (error) {
       console.error(
