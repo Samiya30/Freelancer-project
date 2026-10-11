@@ -340,7 +340,13 @@ export default function TeamPage() {
         );
       }
 
-      await Promise.all(requests);
+      const results = await Promise.allSettled(requests);
+
+results.forEach((result, index) => {
+  if (result.status === "rejected") {
+    console.error(`Team request ${index + 1} failed:`, result.reason);
+  }
+});
     } catch (error) {
       console.error(
         "Failed to load team data:",
@@ -1281,11 +1287,7 @@ export default function TeamPage() {
 
                                     <td className="px-6 py-5">
                                       <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
-                                        {
-                                          member
-                                            .permissionOverrides
-                                            .length
-                                        }
+                                        {(member.permissionOverrides ?? []).length}
                                       </span>
                                     </td>
 
@@ -1512,11 +1514,7 @@ export default function TeamPage() {
                                   </span>
 
                                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
-                                    {
-                                      member
-                                        .permissionOverrides
-                                        .length
-                                    }{" "}
+                                    (member.permissionOverrides ?? []).length
                                     overrides
                                   </span>
                                 </div>

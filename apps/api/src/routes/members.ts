@@ -27,10 +27,15 @@ async function getWorkspaceMember(userId: number) {
     include: {
       workspace: true,
       role: {
-        include: {
+              include: {
           rolePermissions: {
             include: {
               permission: true,
+            },
+          },
+          _count: {
+            select: {
+              members: true,
             },
           },
         },
@@ -453,6 +458,11 @@ router.post(
                 rolePermissions: {
                   include: {
                     permission: true,
+                  },
+                },
+                _count: {
+                  select: {
+                    members: true,
                   },
                 },
               },
@@ -1002,6 +1012,11 @@ router.post(
             rolePermissions: {
               include: {
                 permission: true,
+              },
+            },
+            _count: {
+              select: {
+                members: true,
               },
             },
           },
@@ -1816,6 +1831,12 @@ router.get(
                 isSystem: true,
               },
             },
+
+            permissionOverrides: {
+              include: {
+                permission: true,
+              },
+            },
           },
 
           orderBy: [
@@ -1972,6 +1993,11 @@ router.patch(
             rolePermissions: {
               include: {
                 permission: true,
+              },
+            },
+            _count: {
+              select: {
+                members: true,
               },
             },
           },
@@ -2897,6 +2923,68 @@ router.delete(
     }
   },
 );
+
+/*
+|--------------------------------------------------------------------------
+| GET ROLES
+|--------------------------------------------------------------------------
+*/
+
+router.get("/roles", async (req, res) => {
+  try {
+    const member = await requireCurrentMember(req, res);
+
+    if (!member) {
+      return;
+    }
+
+    const permissions = await getEffectivePermissionKeys(
+      member.id,
+      member.roleId,
+    );
+
+    if (!hasPermission(permissions, "roles.view")) {
+      res.status(403).json({
+        success: false,
+        message: "You do not have permission to view roles.",
+      });
+      return;
+    }
+
+    const roles = await prisma.role.findMany({
+      where: {
+        workspaceId: member.workspaceId,
+      },
+      include: {
+          rolePermissions: {
+            include: {
+              permission: true,
+            },
+          },
+          _count: {
+            select: {
+              members: true,
+            },
+          },
+        },
+      orderBy: {
+        name: "asc",
+      },
+    });
+
+    res.json({
+      success: true,
+      data: roles,
+    });
+  } catch (error) {
+    console.error("GET /api/members/roles error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load roles.",
+    });
+  }
+});
 
 /*
 |--------------------------------------------------------------------------
