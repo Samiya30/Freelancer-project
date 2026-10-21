@@ -1514,8 +1514,7 @@ results.forEach((result, index) => {
                                   </span>
 
                                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
-                                    (member.permissionOverrides ?? []).length
-                                    overrides
+                                    {(member.permissionOverrides ?? []).length} overrides
                                   </span>
                                 </div>
 
